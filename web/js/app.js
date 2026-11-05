@@ -3,6 +3,7 @@ import { stitchPanorama } from './stitcher.js';
 import { warpPerspective, suggestOutputSize, isConvexQuad } from './perspective.js';
 import { mergeClips, pickMimeType, extensionFor } from './merger.js';
 import { bridge } from './bridge.js';
+import { analyze } from './analysis.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -28,7 +29,10 @@ const S = {
   clips: [], keyframes: [], lastKf: null, mimeType: undefined,
   pano: null, corners: null, view: null,
   mergeGen: 0, mergePromise: null, merged: null, resultBlob: null, resultSize: null,
+  mode: 'camera', upload: null, stats: null, analysis: null, lastT: 0,
 };
+const newStats = () => ({ frames: 0, okFrames: 0, fastFrames: 0, speeds: [], ys: [] });
+S.stats = newStats();
 window.__neocortex = S; // test / hata ayıklama
 
 // ---------------- Kamera ----------------
@@ -111,8 +115,13 @@ function tick() {
 
   S.procCtx.drawImage(v, 0, 0, S.PW, S.PH);
   toGray(S.procCtx.getImageData(0, 0, S.PW, S.PH).data, S.cur);
+  // Yüklenen videoda video zamanı, kamerada gerçek zaman
+  const t = S.mode === 'upload' ? v.currentTime : performance.now() / 1000;
+  const dt = t - S.lastT;
+  S.lastT = t;
   if (S.hasPrev) {
     const r = estimateShift(S.prev, S.cur, S.PW, S.PH, { radius: RADIUS });
+    if (S.recording) collectStats(r, dt);
     if (r.ok) {
       S.pos.x -= r.sx;
       S.pos.y -= r.sy;
@@ -134,6 +143,17 @@ function tick() {
   drawOverlay();
   drawMinimap();
   $('chip-speed').classList.toggle('hidden', !(S.recording && S.speed > RADIUS * 0.6));
+}
+
+function collectStats(r, dt) {
+  const st = S.stats;
+  st.frames++;
+  if (r.ok) {
+    st.okFrames++;
+    if (dt > 0 && dt < 0.5) st.speeds.push(Math.hypot(r.sx / S.PW, r.sy / S.PH) / dt);
+  }
+  if (r.ok && Math.hypot(r.sx, r.sy) > RADIUS * 0.6) st.fastFrames++;
+  st.ys.push(S.pos.y / S.PH);
 }
 
 // ---------------- Mavi kapsama katmanı ----------------
@@ -320,6 +340,7 @@ function stopClip() {
 }
 
 function totalDuration() {
+  if (S.mode === 'upload') return $('preview').currentTime || 0;
   const base = S.clips.reduce((s, c) => s + c.duration, 0);
   return base + (S.recording ? (performance.now() - S.recStart) / 1000 : 0);
 }
@@ -339,12 +360,21 @@ function updateUI() {
   $('btn-record').setAttribute('aria-label', S.recording ? 'Kaydı durdur' : 'Kaydı başlat');
   $('btn-record').disabled = !S.stream;
   $('chip-rec').classList.toggle('hidden', !S.recording);
+  $('chip-rec-text').textContent = S.mode === 'upload' ? 'VİDEO' : 'KAYIT';
   const n = S.clips.length + (S.recording ? 1 : 0);
-  $('chip-clips').textContent = `${n} çekim`;
-  $('btn-finish').disabled = S.recording || S.clips.length === 0;
-  $('btn-reset').disabled = S.recording || (S.clips.length === 0 && !S.cover);
+  $('chip-clips').textContent = S.mode === 'upload' ? 'Yüklenen video' : `${n} çekim`;
+  const uploadReady = S.mode === 'upload' && S.keyframes.length > 0;
+  $('btn-finish').disabled = S.recording || (S.clips.length === 0 && !uploadReady);
+  $('btn-reset').disabled = S.recording || (S.clips.length === 0 && !S.cover && S.mode !== 'upload');
+  $('btn-record').disabled = !S.stream && S.mode !== 'upload';
+  $('btn-upload').disabled = S.recording;
   updateTimer();
-  if (S.recording) setHint('Yavaşça kaydır. Mavi alanlar çekildi; boş kalan yerleri tamamla.');
+  if (S.mode === 'upload') {
+    const v = $('preview');
+    if (S.recording) setHint('Video oynatılıyor; kamera gibi takip ediliyor. Durdurmak için kırmızı butona bas.');
+    else if (v.ended) setHint('Video bitti. Analiz ve sonuç için Bitir’e bas.');
+    else setHint('Video durdu. Devam için kırmızı butona, sonuç için Bitir’e bas.');
+  } else if (S.recording) setHint('Yavaşça kaydır. Mavi alanlar çekildi; boş kalan yerleri tamamla.');
   else if (S.clips.length) setHint('Eksik yerleri yeni çekimle tamamla ya da Bitir’e bas.');
   else setHint(S.defaultHint);
 }
@@ -367,8 +397,110 @@ function resetAll() {
   S.merged = null;
   S.mergePromise = null;
   S.resultBlob = null;
+  S.stats = newStats();
+  S.analysis = null;
+  S.hasPrev = false;
+  if (S.mode === 'upload') leaveUpload();
   showScreen('camera');
   updateUI();
+}
+
+// ---------------- Video yükleme (kamera gibi oynat) ----------------
+
+async function askUpload() {
+  if (S.recording) return;
+  if (S.clips.length || S.cover) {
+    const yes = await confirmSheet({
+      title: 'Video yüklensin mi?',
+      text: 'Yüklenen video yeni bir çekim gibi baştan analiz edilir.',
+      warn: 'Mevcut çekimler ve mavi kapsama alanı silinecek.',
+      ok: 'Sil ve video seç',
+    });
+    if (!yes) return;
+  }
+  $('file-input').click();
+}
+
+async function loadUpload(file) {
+  resetAll();
+  const v = $('preview');
+  const url = URL.createObjectURL(file);
+  S.mode = 'upload';
+  S.upload = { file, url };
+  $('cam-error').classList.add('hidden');
+  v.pause();
+  v.srcObject = null;
+  v.muted = true;
+  v.loop = false;
+  v.src = url;
+  try {
+    await new Promise((resolve, reject) => {
+      v.addEventListener('loadeddata', resolve, { once: true });
+      v.addEventListener('error', () => reject(v.error), { once: true });
+    });
+  } catch {
+    toast('Bu video açılamadı. MP4 (H.264) formatında bir video dene.');
+    leaveUpload();
+    updateUI();
+    return;
+  }
+  setupProc(v.videoWidth, v.videoHeight);
+  v.onended = onUploadEnded;
+  scheduleTick();
+  startUploadPlayback();
+}
+
+function startUploadPlayback() {
+  const v = $('preview');
+  if (v.ended) return;
+  S.recording = true;
+  S.newClip = true; // devamda ilk kare anahtar kare olsun
+  S.hasPrev = false;
+  invalidateResults();
+  v.play().catch(() => {
+    S.recording = false;
+    updateUI();
+  });
+  updateUI();
+}
+
+function toggleUploadPlayback() {
+  const v = $('preview');
+  if (S.recording) {
+    v.pause();
+    S.recording = false;
+    updateUI();
+  } else startUploadPlayback();
+}
+
+function onUploadEnded() {
+  S.recording = false;
+  ensureUploadClip();
+  updateUI();
+}
+
+function ensureUploadClip() {
+  if (S.mode !== 'upload' || S.clips.length) return;
+  const v = $('preview');
+  const f = S.upload.file;
+  S.clips.push({ blob: f, duration: v.duration || v.currentTime || 0, mimeType: f.type || 'video/mp4', uploaded: true });
+}
+
+function leaveUpload() {
+  const v = $('preview');
+  v.onended = null;
+  v.pause();
+  v.removeAttribute('src');
+  if (S.upload) URL.revokeObjectURL(S.upload.url);
+  S.upload = null;
+  S.mode = 'camera';
+  S.recording = false;
+  if (S.stream) {
+    v.srcObject = S.stream;
+    v.play().catch(() => {});
+  } else if ($('cam-error-text').textContent) {
+    $('cam-error').classList.remove('hidden'); // kamera yoksa hata ekranına dön
+  }
 }
 
 function invalidateResults() {
@@ -381,12 +513,17 @@ function invalidateResults() {
 // ---------------- Bitir: birleştir + panorama ----------------
 
 async function finish() {
-  await stopClip();
+  if (S.mode === 'upload') {
+    $('preview').pause();
+    S.recording = false;
+    ensureUploadClip();
+  } else await stopClip();
   if (!S.clips.length) return;
   showBusy('Çekimler birleştiriliyor…');
   startMerge();
   try {
     S.pano = await buildPanorama();
+    S.analysis = computeAnalysis();
   } catch (e) {
     console.error(e);
     hideBusy();
@@ -401,6 +538,13 @@ function startMerge() {
   if (S.mergePromise) return S.mergePromise;
   const gen = S.mergeGen;
   const clips = S.clips.slice();
+  if (clips.length === 1 && clips[0].uploaded) {
+    // Yüklenen video zaten tek parça: yeniden kodlamaya gerek yok.
+    S.merged = { blob: clips[0].blob, mimeType: clips[0].mimeType, duration: clips[0].duration };
+    S.mergePromise = Promise.resolve(S.merged);
+    setMergeState('done', 1);
+    return S.mergePromise;
+  }
   setMergeState('running', 0);
   S.mergePromise = mergeClips(clips, {
     mimeType: S.mimeType,
@@ -482,6 +626,104 @@ async function buildPanorama() {
     images.map((image, i) => ({ image, x: positions[i].x, y: positions[i].y })),
     { procW: S.PW, procH: S.PH, scale: S.KW / S.PW },
   );
+}
+
+// ---------------- Analiz ----------------
+
+function coverageFill() {
+  const c = S.cover;
+  if (!c) return 0;
+  const x = Math.max(0, Math.floor(S.maskOX + c.minX));
+  const y = Math.max(0, Math.floor(S.maskOY + c.minY));
+  const w = Math.min(MASK_W - x, Math.ceil(c.maxX - c.minX));
+  const h = Math.min(MASK_H - y, Math.ceil(c.maxY - c.minY));
+  if (w <= 0 || h <= 0) return 0;
+  const d = S.maskCtx.getImageData(x, y, w, h).data;
+  let on = 0;
+  for (let i = 3; i < d.length; i += 4) if (d[i] > 0) on++;
+  return on / (w * h);
+}
+
+function computeAnalysis() {
+  const c = S.cover;
+  const zw = (1 - 2 * INSET) * S.PW;
+  const zh = (1 - 2 * INSET) * S.PH;
+  // Taranan alan: boyanan bölge + kenar payları = gerçekten görüntülenen alan (kadraj cinsinden)
+  const coverW = c ? (c.maxX - c.minX + (S.PW - zw)) / S.PW : 0;
+  const coverH = c ? (c.maxY - c.minY + (S.PH - zh)) / S.PH : 0;
+  return analyze({
+    ...S.stats,
+    duration: S.clips.reduce((s, k) => s + k.duration, 0),
+    clips: S.mode === 'upload' ? 1 : S.clips.length,
+    keyframes: S.keyframes.length,
+    coverW,
+    coverH,
+    fill: coverageFill(),
+  });
+}
+
+function renderAnalysis() {
+  const a = S.analysis;
+  $('analysis-card').classList.toggle('hidden', !a);
+  if (!a) return;
+  const sc = $('score');
+  sc.textContent = a.score;
+  sc.className = `score ${a.level}`;
+  $('score-label').textContent = `Çekim kalitesi: ${a.label}`;
+  $('score-label').className = `badge ${a.level}`;
+  $('analysis-source').textContent = S.mode === 'upload' ? 'Yüklenen video analizi' : 'Kamera çekimi analizi';
+  const grid = $('metrics');
+  grid.replaceChildren(
+    ...a.metrics.map((m) => {
+      const el = document.createElement('div');
+      el.className = 'metric';
+      const l = document.createElement('div');
+      l.className = 'metric-label';
+      l.textContent = m.label;
+      const v = document.createElement('div');
+      v.className = 'metric-value';
+      v.textContent = m.value;
+      const h = document.createElement('div');
+      h.className = 'metric-hint';
+      h.textContent = m.hint;
+      el.append(l, v, h);
+      return el;
+    }),
+  );
+  $('tips').replaceChildren(
+    ...a.tips.map((t) => {
+      const li = document.createElement('li');
+      li.textContent = t;
+      return li;
+    }),
+  );
+  drawCoverageMap();
+}
+
+// Panorama üzerine mavi kapsama haritası (boş kalan yerler mavisiz görünür).
+function drawCoverageMap() {
+  const cv = $('coverage-map');
+  if (!S.pano || !S.cover || !S.keyframes.length) return;
+  const maxW = 1200;
+  const k = Math.min(1, maxW / S.pano.width);
+  cv.width = Math.round(S.pano.width * k);
+  cv.height = Math.round(S.pano.height * k);
+  const ctx = cv.getContext('2d');
+  ctx.drawImage(S.pano, 0, 0, cv.width, cv.height);
+  // Panorama sınırları (takip koordinatında)
+  let minX = Infinity;
+  let minY = Infinity;
+  let maxX = -Infinity;
+  let maxY = -Infinity;
+  for (const f of S.keyframes) {
+    minX = Math.min(minX, f.x);
+    minY = Math.min(minY, f.y);
+    maxX = Math.max(maxX, f.x + S.PW);
+    maxY = Math.max(maxY, f.y + S.PH);
+  }
+  ctx.globalAlpha = 0.45;
+  drawImageClipped(ctx, S.mask, S.maskOX + minX, S.maskOY + minY, maxX - minX, maxY - minY, 0, 0, cv.width, cv.height);
+  ctx.globalAlpha = 1;
 }
 
 // ---------------- Perspektif ----------------
@@ -629,6 +871,7 @@ async function applyPerspective() {
     $('save-hint').classList.toggle('hidden', bridge.available);
     startMerge();
     if (S.merged) setMergeState('done', 1);
+    renderAnalysis();
     showScreen('result');
   } catch (e) {
     console.error(e);
@@ -765,7 +1008,17 @@ async function askReset() {
 
 // ---------------- Olaylar ----------------
 
-$('btn-record').addEventListener('click', () => (S.recording ? stopClip() : startClip()));
+$('btn-record').addEventListener('click', () => {
+  if (S.mode === 'upload') return toggleUploadPlayback();
+  return S.recording ? stopClip() : startClip();
+});
+$('btn-upload').addEventListener('click', askUpload);
+$('btn-upload-err').addEventListener('click', askUpload);
+$('file-input').addEventListener('change', (e) => {
+  const f = e.target.files && e.target.files[0];
+  e.target.value = '';
+  if (f) loadUpload(f);
+});
 $('btn-finish').addEventListener('click', finish);
 $('btn-reset').addEventListener('click', askReset);
 $('btn-retry').addEventListener('click', startCamera);

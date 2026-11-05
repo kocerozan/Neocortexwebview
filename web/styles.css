@@ -85,6 +85,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 }
 .shutter:disabled { opacity: .4; }
 .is-recording .shutter-inner { width: 32px; height: 32px; border-radius: 8px; }
+.bar-left { display: flex; justify-content: space-evenly; width: 100%; }
+.bar-left .bar-side { min-width: 60px; }
 .bar-side {
   justify-self: center; background: none; border: 0; color: #fff; min-width: 72px; min-height: 56px;
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 4px; font-size: 13px;
@@ -186,3 +188,25 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
   background: var(--navy-t); color: #fff; padding: 10px 16px; border-radius: 999px; font-size: 14px;
   max-width: calc(100% - 32px); text-align: center;
 }
+
+/* ---------- Analiz ---------- */
+.badge.good { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-b); }
+.badge.medium { background: var(--warn-bg); color: var(--warn-t); }
+.badge.poor { background: var(--danger-bg); color: var(--danger-t); }
+.score-row { display: flex; align-items: center; gap: 14px; }
+.score {
+  width: 72px; height: 72px; border-radius: 50%; display: grid; place-items: center;
+  font-size: 28px; font-weight: 700; border: 6px solid var(--navy-l); color: var(--navy-t); flex: none;
+}
+.score.good { border-color: var(--ok-b); color: var(--ok); }
+.score.medium { border-color: #F3C38A; color: var(--warn-t); }
+.score.poor { border-color: #E9A39C; color: var(--danger-t); }
+.score-text { font-size: 15px; font-weight: 500; line-height: 1.4; }
+.metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.metric { background: var(--bg); border: 1px solid var(--border); border-radius: 12px; padding: 8px 10px; }
+.metric-label { font-size: 12px; color: var(--muted); }
+.metric-value { font-size: 18px; font-weight: 700; color: var(--navy-t); margin-top: 2px; }
+.metric-hint { font-size: 11px; color: var(--muted); }
+.sub-title { font-size: 14px; font-weight: 700; color: var(--navy-t); margin-top: 4px; }
+.tips { margin: 0; padding-left: 18px; font-size: 13px; color: var(--navy-t); line-height: 1.45; display: flex; flex-direction: column; gap: 4px; }
+.cam-error .btn-secondary { background: transparent; color: #fff; border-color: rgba(255,255,255,.6); }

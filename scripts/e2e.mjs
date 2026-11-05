@@ -1,5 +1,5 @@
 // Uçtan uca duman testi: sahte kamera (kaydırılan görüntü) ile tüm akış.
-// Kullanım: node scripts/e2e.mjs <sahte-video.mjpeg|y4m> [çıktı-klasörü]
+// Kullanım: node scripts/e2e.mjs <sahte-kamera.y4m> [çıktı-klasörü] [yüklenecek-video.mp4]
 import { createRequire } from 'node:module';
 const { chromium } = createRequire(import.meta.url)('playwright'); // global veya yerel kurulum
 import { spawn } from 'node:child_process';
@@ -106,6 +106,35 @@ try {
   const types = messages.map((m) => m.type);
   console.log('köprü mesajları:', [...new Set(types)].join(', '), `(${messages.length})`);
   check(types.includes('ready') && types.includes('file.end') && types.includes('result.complete'), 'köprü protokolü çalışıyor');
+
+  // ---- Video yükleme: dosya kamera gibi oynatılır, takip + mavi katman + analiz ----
+  const uploadFile = process.argv[4];
+  if (uploadFile) {
+    await page.click('#btn-restart');
+    await page.click('#sheet-ok');
+    await page.setInputFiles('#file-input', path.resolve(uploadFile));
+    await page.waitForFunction(() => window.__neocortex.mode === 'upload' && window.__neocortex.recording, null, { timeout: 10000 });
+    await wait(2500);
+    await page.screenshot({ path: `${outDir}/4-yukleme.png` });
+    await page.waitForFunction(() => document.getElementById('preview').ended, null, { timeout: 30000 });
+    await wait(300);
+    const up = await page.evaluate(() => ({ kfs: window.__neocortex.keyframes.length, cover: window.__neocortex.cover, finish: !document.getElementById('btn-finish').disabled }));
+    console.log('yükleme:', JSON.stringify(up));
+    check(up.kfs >= 4 && up.cover && up.cover.maxX - up.cover.minX > 200, 'yüklenen videoda takip ve mavi katman çalıştı');
+    check(up.finish, 'video bitince Bitir aktif');
+    await page.click('#btn-finish');
+    await page.waitForSelector('#screen-perspective:not(.hidden)', { timeout: 20000 });
+    await page.click('#btn-apply');
+    await page.waitForSelector('#screen-result:not(.hidden)', { timeout: 20000 });
+    await wait(500);
+    const an = await page.evaluate(() => window.__neocortex.analysis);
+    console.log('analiz:', an.score, an.label, an.metrics.map((m) => `${m.label}=${m.value}`).join(', '));
+    check(!(await page.isHidden('#analysis-card')) && an.score > 0, 'analiz kartı gösteriliyor');
+    check(await page.isEnabled('#btn-save-video'), 'yüklenen video kaydedilebilir (yeniden kodlamadan)');
+    await page.screenshot({ path: `${outDir}/5-analiz.png`, fullPage: false });
+    await page.evaluate(() => document.querySelector('#screen-result .content').scrollTo(0, 99999));
+    await page.screenshot({ path: `${outDir}/6-analiz-alt.png` });
+  }
 } catch (e) {
   ok = false;
   console.error(e);

@@ -30,7 +30,7 @@
         <div class="chips">
           <span class="chip" id="chip-clips">0 çekim</span>
           <span class="chip" id="chip-time">00:00</span>
-          <span class="chip rec hidden" id="chip-rec"><i></i>KAYIT</span>
+          <span class="chip rec hidden" id="chip-rec"><i></i><span id="chip-rec-text">KAYIT</span></span>
           <span class="chip warn hidden" id="chip-speed">Çok hızlı, yavaşla</span>
         </div>
       </div>
@@ -40,14 +40,22 @@
         <div class="cam-error-title">Kamera açılamadı</div>
         <div class="cam-error-text" id="cam-error-text"></div>
         <button class="btn btn-primary" id="btn-retry">Tekrar dene</button>
+        <button class="btn btn-secondary" id="btn-upload-err">Video yükle</button>
       </div>
     </div>
 
+    <input type="file" id="file-input" accept="video/*" class="hidden" />
     <div class="cam-bar">
-      <button class="bar-side" id="btn-reset" disabled>
-        <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/></svg>
-        <span>Sıfırla</span>
-      </button>
+      <div class="bar-left">
+        <button class="bar-side" id="btn-reset" disabled>
+          <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/></svg>
+          <span>Sıfırla</span>
+        </button>
+        <button class="bar-side" id="btn-upload">
+          <svg viewBox="0 0 24 24"><path d="M12 15V4"/><path d="M7 9l5-5 5 5"/><path d="M5 20h14"/></svg>
+          <span>Video yükle</span>
+        </button>
+      </div>
       <button class="shutter" id="btn-record" aria-label="Kaydı başlat"><span class="shutter-inner"></span></button>
       <button class="bar-side" id="btn-finish" disabled>
         <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
@@ -103,6 +111,22 @@
         <canvas id="result-canvas" class="hidden"></canvas>
         <img id="result-img" class="result-img" alt="Perspektifi düzeltilmiş görüntü" />
         <div class="save-hint" id="save-hint">İpucu: Fotoğrafa basılı tutarak da galeriye kaydedebilirsin.</div>
+      </div>
+      <div class="card hidden" id="analysis-card">
+        <div class="card-head">
+          <span class="badge" id="score-label">Çekim kalitesi</span>
+          <span class="muted" id="analysis-source"></span>
+        </div>
+        <div class="score-row">
+          <div class="score" id="score">0</div>
+          <div class="score-text">Kalite puanı<br /><span class="muted">100 üzerinden</span></div>
+        </div>
+        <div class="metrics" id="metrics"></div>
+        <div class="sub-title">Kapsama haritası</div>
+        <canvas id="coverage-map" class="result-img"></canvas>
+        <div class="save-hint">Mavi alanlar çekildi; mavisiz kalan yerler eksik.</div>
+        <div class="sub-title">Öneriler</div>
+        <ul class="tips" id="tips"></ul>
       </div>
       <div class="card">
         <div class="card-head">
