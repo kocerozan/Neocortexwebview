@@ -32,6 +32,7 @@
           <span class="chip" id="chip-time">00:00</span>
           <span class="chip rec hidden" id="chip-rec"><i></i><span id="chip-rec-text">KAYIT</span></span>
           <span class="chip warn hidden" id="chip-speed">Çok hızlı, yavaşla</span>
+          <span class="chip det hidden" id="chip-det"><svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="16" rx="1"/></svg>Dolap algılandı</span>
         </div>
       </div>
 
@@ -83,6 +84,10 @@
       <div class="handle" data-i="2"><i></i></div>
       <div class="handle" data-i="3"><i></i></div>
       <canvas id="loupe" class="loupe hidden" width="224" height="224"></canvas>
+      <button class="stage-btn" id="btn-auto">
+        <svg viewBox="0 0 24 24"><path d="M4 8V4h4M16 4h4v4M20 16v4h-4M8 20H4v-4"/></svg>
+        Otomatik bul
+      </button>
     </div>
     <div class="persp-info" id="persp-info"></div>
     <div class="actions">

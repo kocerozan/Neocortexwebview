@@ -4,6 +4,7 @@ import { warpPerspective, suggestOutputSize, isConvexQuad } from './perspective.
 import { mergeClips, pickMimeType, extensionFor } from './merger.js';
 import { bridge } from './bridge.js';
 import { analyze } from './analysis.js';
+import { detectQuad } from './detector.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -18,6 +19,9 @@ const MASK_W = 3200;
 const MASK_H = 2400;
 const COVER_COLOR = '#2F80ED';
 const COVER_ALPHA = 0.42;
+const DET_W = 200; // dolap algılama karesi genişliği
+const DET_MS = 450; // canlı algılama aralığı
+const DET_COLOR = '#34C759';
 
 const S = {
   stream: null,
@@ -30,7 +34,10 @@ const S = {
   pano: null, corners: null, view: null,
   mergeGen: 0, mergePromise: null, merged: null, resultBlob: null, resultSize: null,
   mode: 'camera', upload: null, stats: null, analysis: null, lastT: 0,
+  det: null, lastDet: 0, detCtx: null, detGray: null, cornersAuto: false,
 };
+const newDet = () => ({ q: null, pos: { x: 0, y: 0 }, hits: 0, misses: 0, shown: false });
+S.det = newDet();
 const newStats = () => ({ frames: 0, okFrames: 0, fastFrames: 0, speeds: [], ys: [] });
 S.stats = newStats();
 window.__neocortex = S; // test / hata ayıklama
@@ -140,6 +147,7 @@ function tick() {
     maybeKeyframe(v);
     updateTimer();
   }
+  maybeDetect(v);
   drawOverlay();
   drawMinimap();
   $('chip-speed').classList.toggle('hidden', !(S.recording && S.speed > RADIUS * 0.6));
@@ -154,6 +162,91 @@ function collectStats(r, dt) {
   }
   if (r.ok && Math.hypot(r.sx, r.sy) > RADIUS * 0.6) st.fastFrames++;
   st.ys.push(S.pos.y / S.PH);
+}
+
+// ---------------- Dolap algılama (canlı) ----------------
+
+function grayOf(source, w, h) {
+  if (!S.detCtx || S.detCtx.canvas.width !== w || S.detCtx.canvas.height !== h) {
+    const c = document.createElement('canvas');
+    c.width = w;
+    c.height = h;
+    S.detCtx = c.getContext('2d', { willReadFrequently: true });
+    S.detGray = new Uint8Array(w * h);
+  }
+  const ctx = S.detCtx;
+  ctx.fillStyle = '#808080'; // panoramadaki saydam alanlar sahte kenar üretmesin
+  ctx.fillRect(0, 0, w, h);
+  ctx.drawImage(source, 0, 0, w, h);
+  return toGray(ctx.getImageData(0, 0, w, h).data, S.detGray);
+}
+
+function maybeDetect(v) {
+  const now = performance.now();
+  if (now - S.lastDet < DET_MS) return;
+  S.lastDet = now;
+  const dw = DET_W;
+  const dh = Math.round((DET_W * S.vh) / S.vw);
+  const r = detectQuad(grayOf(v, dw, dh), dw, dh);
+  const d = S.det;
+  // Önceki çerçeveyi kamera hareketi kadar kaydır (karşılaştırma için)
+  const sx = -(S.pos.x - d.pos.x) / S.PW;
+  const sy = -(S.pos.y - d.pos.y) / S.PH;
+  const prev = d.q && d.q.map((p) => ({ x: p.x + sx, y: p.y + sy }));
+  d.pos = { ...S.pos };
+  if (r) {
+    const q = r.corners.map((p) => ({ x: p.x / dw, y: p.y / dh }));
+    const close = prev && q.every((p, i) => Math.hypot(p.x - prev[i].x, p.y - prev[i].y) < 0.08);
+    d.q = close ? prev.map((p, i) => ({ x: (p.x + q[i].x) / 2, y: (p.y + q[i].y) / 2 })) : q;
+    d.hits = close ? d.hits + 1 : 1;
+    d.misses = 0;
+  } else {
+    d.q = prev;
+    if (++d.misses >= 3) {
+      d.hits = 0;
+      d.q = null;
+    }
+  }
+  const shown = d.hits >= 2 && !!d.q;
+  if (shown !== d.shown) {
+    d.shown = shown;
+    $('chip-det').classList.toggle('hidden', !shown);
+  }
+}
+
+function drawDetection(ctx, ox, oy, fw, fh) {
+  const d = S.det;
+  if (!d.shown || !d.q) return;
+  // Algılamalar arasında çerçeve kamera hareketiyle birlikte kayar
+  const sx = -(S.pos.x - d.pos.x) / S.PW;
+  const sy = -(S.pos.y - d.pos.y) / S.PH;
+  const pts = d.q.map((p) => ({ x: ox + (p.x + sx) * fw, y: oy + (p.y + sy) * fh }));
+  ctx.beginPath();
+  pts.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+  ctx.closePath();
+  ctx.fillStyle = 'rgba(52,199,89,0.10)';
+  ctx.fill();
+  ctx.lineWidth = 3;
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = DET_COLOR;
+  ctx.stroke();
+  ctx.fillStyle = DET_COLOR;
+  for (const p of pts) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  const label = 'Dolap';
+  ctx.font = '600 13px Roboto, system-ui, sans-serif';
+  const tw = ctx.measureText(label).width + 16;
+  const lx = Math.max(4, Math.min(pts[0].x, fw + ox - tw - 4));
+  const ly = Math.max(4, pts[0].y - 28);
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(lx, ly, tw, 22, 11);
+  else ctx.rect(lx, ly, tw, 22);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.fillText(label, lx + 8, ly + 15.5);
 }
 
 // ---------------- Mavi kapsama katmanı ----------------
@@ -207,6 +300,7 @@ function drawOverlay() {
     drawImageClipped(ctx, S.mask, S.maskOX + S.pos.x, S.maskOY + S.pos.y, S.PW, S.PH, ox, oy, fw, fh);
     ctx.globalAlpha = 1;
   }
+  drawDetection(ctx, ox, oy, fw, fh);
 
   // Kadraj köşeleri (çekim bölgesi)
   const zx = ox + INSET * fw;
@@ -399,6 +493,9 @@ function resetAll() {
   S.resultBlob = null;
   S.stats = newStats();
   S.analysis = null;
+  S.det = newDet();
+  S.cornersAuto = false;
+  $('chip-det').classList.add('hidden');
   S.hasPrev = false;
   if (S.mode === 'upload') leaveUpload();
   showScreen('camera');
@@ -735,7 +832,8 @@ function openPerspective() {
   c.width = S.pano.width;
   c.height = S.pano.height;
   c.getContext('2d').drawImage(S.pano, 0, 0);
-  if (!S.corners) {
+  if (!S.corners && !autoCorners()) {
+    S.cornersAuto = false;
     const w = S.pano.width;
     const h = S.pano.height;
     const m = 0.04;
@@ -748,6 +846,19 @@ function openPerspective() {
   }
   showScreen('perspective');
   layoutStage();
+}
+
+// Panoramada dolabı bul ve köşeleri oraya koy.
+function autoCorners() {
+  if (!S.pano) return false;
+  const k = Math.min(1, 480 / Math.max(S.pano.width, S.pano.height));
+  const w = Math.max(16, Math.round(S.pano.width * k));
+  const h = Math.max(16, Math.round(S.pano.height * k));
+  const r = detectQuad(grayOf(S.pano, w, h), w, h, { margin: 0.01 });
+  if (!r) return false;
+  S.corners = r.corners.map((p) => ({ x: p.x / k, y: p.y / k }));
+  S.cornersAuto = true;
+  return true;
 }
 
 function layoutStage() {
@@ -773,12 +884,13 @@ function positionHandles() {
   const pts = S.corners.map(toStage);
   handles.forEach((h, i) => (h.style.transform = `translate(${pts[i].x}px, ${pts[i].y}px)`));
   $('quad-poly').setAttribute('points', pts.map((p) => `${p.x},${p.y}`).join(' '));
+  $('quad').classList.toggle('auto', S.cornersAuto);
   const ok = isConvexQuad(S.corners);
   const info = $('persp-info');
   info.classList.toggle('error', !ok);
   if (ok) {
     const { width, height } = suggestOutputSize(S.corners);
-    info.textContent = `Çıktı: ${width} × ${height} px`;
+    info.textContent = `${S.cornersAuto ? 'Dolap otomatik bulundu, köşeleri kontrol et · ' : ''}Çıktı: ${width} × ${height} px`;
   } else info.textContent = 'Köşeler çaprazlandı. Sırayı koru: sol-üst, sağ-üst, sağ-alt, sol-alt.';
   $('btn-apply').disabled = !ok;
 }
@@ -828,6 +940,7 @@ handles.forEach((h, i) => {
     const r = $('stage').getBoundingClientRect();
     const x = (e.clientX - r.left - grab.x - S.view.left) / S.view.s;
     const y = (e.clientY - r.top - grab.y - S.view.top) / S.view.s;
+    S.cornersAuto = false;
     S.corners[i] = {
       x: Math.max(0, Math.min(S.pano.width, x)),
       y: Math.max(0, Math.min(S.pano.height, y)),
@@ -1024,6 +1137,12 @@ $('btn-reset').addEventListener('click', askReset);
 $('btn-retry').addEventListener('click', startCamera);
 $('btn-close').addEventListener('click', () => bridge.post({ type: 'close' }));
 $('btn-apply').addEventListener('click', applyPerspective);
+$('btn-auto').addEventListener('click', () => {
+  if (autoCorners()) {
+    positionHandles();
+    toast('Dolap bulundu');
+  } else toast('Dolap bulunamadı. Köşeleri elle ayarla.');
+});
 $('btn-continue').addEventListener('click', () => showScreen('camera'));
 $('btn-persp-back').addEventListener('click', () => showScreen('camera'));
 $('btn-result-back').addEventListener('click', () => {

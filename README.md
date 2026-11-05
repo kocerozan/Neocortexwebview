@@ -9,8 +9,9 @@ iOS (WKWebView) ve Android (WebView) uygulamalarına gömülen kamera ekranı:
    - videolardan alınan anahtar kareler tek bir **panorama görüntüsünde** birleştirilir.
 4. **Perspektif:** Panorama üzerindeki dört köşeyi teşhirin/rafın köşelerine taşırsın (büyüteç yardımcı olur). "Perspektifi uygula" ile görüntü **düz, önden bakış** haline getirilir.
 5. **Video yükleme:** "Video yükle" ile galeriden bir video seçersin. Video kamera açıkmış gibi oynatılır: takip, mavi katman ve mini harita canlı çalışır. Kırmızı buton oynatmayı durdurur ya da devam ettirir. Bitir'den sonra akış aynıdır.
-6. **Analiz:** Sonuç ekranında kalite puanı (0-100), taranan alan, kapsama oranı, ortalama hız, hızlı anlar, takip kaybı, dikey sapma, kapsama haritası ve öneriler gösterilir.
-7. **Gönder / Kaydet:** Perspektif görüntüsü (JPEG) ve birleştirilmiş video native uygulamaya köprüyle aktarılır. Native köprü yoksa (tarayıcıda) cihaza indirilir.
+6. **Dolap algılama:** Kamera ya da yüklenen video ekranında dolap kadraja tam girince yeşil çerçeve ve "Dolap algılandı" etiketi çıkar. Çerçeve kamera hareketiyle birlikte kayar. Perspektif ekranında dört köşe otomatik olarak dolabın köşelerine yerleşir ("Otomatik bul" ile yeniden aranır). Yöntem makine öğrenmesi değildir: kenar ve doğru tespitiyle güçlü, tutarlı kenarları olan en büyük dörtgen aranır. Ürün kenarlarından oluşan sahte çerçeveler kenar yönü, kontrast ve tekdüzelik kontrolleriyle elenir.
+7. **Analiz:** Sonuç ekranında kalite puanı (0-100), taranan alan, kapsama oranı, ortalama hız, hızlı anlar, takip kaybı, dikey sapma, kapsama haritası ve öneriler gösterilir.
+8. **Gönder / Kaydet:** Perspektif görüntüsü (JPEG) ve birleştirilmiş video native uygulamaya köprüyle aktarılır. Native köprü yoksa (tarayıcıda) cihaza indirilir.
 
 Görsel dil NeoCortex mobil kurallarına göre hazırlandı: lacivert `#0B4A8B`, kamera barı `#2A2E35`, 88px deklanşör, alttan açılan onay paneli.
 
@@ -24,6 +25,8 @@ web/                  Webview içeriği (derleme gerektirmez, saf ES modülleri)
   js/stitcher.js      Anahtar karelerden panorama (yumuşak dikiş)
   js/merger.js        Video parçalarını birleştirme (canvas + MediaRecorder)
   js/perspective.js   Homografi ve perspektif düzeltme
+  js/detector.js      Dolap çerçevesi algılama (Hough doğruları + dörtgen seçimi)
+  js/analysis.js      Çekim kalitesi analizi
   js/bridge.js        iOS/Android mesaj köprüsü
 ios/NeoCortexWebView/ Swift: NeoCortexWebViewController + örnek kullanım
 android/              Kotlin örnek uygulama (web/ klasörü APK'ya gömülür)
@@ -36,7 +39,8 @@ scripts/serve.mjs     Yerel sunucu, scripts/e2e.mjs uçtan uca test
 ```bash
 npm start            # http://localhost:8080
 npm test             # birim testleri (takip, homografi)
-node scripts/e2e.mjs <sahte-kamera.y4m> e2e-out [video.mp4]   # Chromium + sahte kamera (+ video yükleme) ile tüm akış
+node scripts/e2e.mjs <sahte-kamera.y4m> e2e-out [video.mp4]
+node scripts/e2e-detect.mjs <dolapli-video.mp4> e2e-out '[1.25,1.45]'   # dolap algılama   # Chromium + sahte kamera (+ video yükleme) ile tüm akış
 ```
 
 > Kamera (getUserMedia) yalnız **güvenli bağlamda** çalışır: `https://` ya da `localhost`. Telefonda denemek için sayfayı HTTPS bir sunucuya koy (veya bir HTTPS tünel kullan).
