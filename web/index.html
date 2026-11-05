@@ -100,7 +100,9 @@
           <span class="badge ok"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>Perspektif alındı</span>
           <span class="muted" id="result-size"></span>
         </div>
-        <canvas id="result-canvas" class="result-img"></canvas>
+        <canvas id="result-canvas" class="hidden"></canvas>
+        <img id="result-img" class="result-img" alt="Perspektifi düzeltilmiş görüntü" />
+        <div class="save-hint" id="save-hint">İpucu: Fotoğrafa basılı tutarak da galeriye kaydedebilirsin.</div>
       </div>
       <div class="card">
         <div class="card-head">
@@ -113,7 +115,15 @@
       </div>
     </div>
     <div class="actions">
-      <button class="btn btn-primary" id="btn-send">Gönder</button>
+      <button class="btn btn-primary hidden" id="btn-send">Gönder</button>
+      <button class="btn btn-primary" id="btn-save-photo">
+        <svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>
+        Fotoğrafı kaydet
+      </button>
+      <button class="btn btn-secondary" id="btn-save-video" disabled>
+        <svg viewBox="0 0 24 24"><path d="M12 4v11"/><path d="M7 10l5 5 5-5"/><path d="M5 20h14"/></svg>
+        <span id="btn-save-video-text">Videoyu kaydet</span>
+      </button>
       <button class="btn btn-danger" id="btn-restart">Baştan çek</button>
     </div>
   </section>

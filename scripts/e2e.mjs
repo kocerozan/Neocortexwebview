@@ -90,8 +90,17 @@ try {
   const vb64 = await page.evaluate(async () => { const b = window.__neocortex.merged.blob; const r = new FileReader(); return await new Promise((ok) => { r.onload = () => ok(String(r.result).split(',')[1]); r.readAsDataURL(b); }); });
   fs.writeFileSync(`${outDir}/birlesik.${res.vid.type.includes('mp4') ? 'mp4' : 'webm'}`, Buffer.from(vb64, 'base64'));
 
-  // Köprü mesajları (tarayıcıda native yok → indirme yolu; olayları yine de doğrula)
-  await page.evaluate(() => { window.NeoCortexAndroid = { postMessage() {} }; });
+  // Tarayıcı: fotoğraf ve video kaydetme butonları
+  check(await page.isVisible('#btn-save-photo') && !(await page.isVisible('#btn-send')), 'tarayıcıda kaydet butonları görünüyor');
+  check(await page.evaluate(() => document.getElementById('result-img').naturalWidth > 0), 'sonuç fotoğrafı <img> olarak gösteriliyor');
+  const [dl1] = await Promise.all([page.waitForEvent('download', { timeout: 10000 }), page.click('#btn-save-photo')]);
+  check(/\.jpg$/.test(dl1.suggestedFilename()), `fotoğraf indirildi: ${dl1.suggestedFilename()}`);
+  check(await page.isEnabled('#btn-save-video'), 'video kaydet butonu aktif');
+  const [dl2] = await Promise.all([page.waitForEvent('download', { timeout: 10000 }), page.click('#btn-save-video')]);
+  check(/\.(mp4|webm)$/.test(dl2.suggestedFilename()), `video indirildi: ${dl2.suggestedFilename()}`);
+
+  // Köprü mesajları (native varmış gibi davran)
+  await page.evaluate(() => { window.NeoCortexAndroid = { postMessage() {} }; document.getElementById('btn-send').classList.remove('hidden'); });
   await page.click('#btn-send');
   await page.waitForFunction(() => document.getElementById('busy').classList.contains('hidden'), null, { timeout: 30000 });
   const types = messages.map((m) => m.type);

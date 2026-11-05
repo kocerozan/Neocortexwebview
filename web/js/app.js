@@ -438,6 +438,9 @@ function setMergeState(state, p, msg) {
   $('merge-error').classList.toggle('hidden', state !== 'error');
   $('merge-error').textContent = msg || '';
   const vid = $('merged-video');
+  $('btn-save-video').disabled = !(state === 'done' && S.merged);
+  $('btn-save-video-text').textContent =
+    state === 'running' ? `Video hazırlanıyor %${Math.round(p * 100)}` : state === 'error' ? 'Video hazırlanamadı' : 'Videoyu kaydet';
   if (state === 'done' && S.merged) {
     if (mergedUrl) URL.revokeObjectURL(mergedUrl);
     mergedUrl = URL.createObjectURL(S.merged.blob);
@@ -598,6 +601,7 @@ handles.forEach((h, i) => {
   h.addEventListener('pointercancel', end);
 });
 
+let resultUrl = null;
 async function applyPerspective() {
   if (!isConvexQuad(S.corners)) return;
   showBusy('Perspektif düzeltiliyor…');
@@ -615,7 +619,14 @@ async function applyPerspective() {
     S.resultSize = { width, height };
     $('result-size').textContent = `${width} × ${height} px`;
     $('result-sub').textContent = `${S.clips.length} çekim · ${fmt(S.clips.reduce((s, c) => s + c.duration, 0))}`;
-    $('btn-send').textContent = bridge.available ? 'Gönder' : 'Cihaza indir';
+    if (resultUrl) URL.revokeObjectURL(resultUrl);
+    resultUrl = URL.createObjectURL(S.resultBlob);
+    $('result-img').src = resultUrl;
+    // Native uygulamada "Gönder", tarayıcıda "Kaydet" butonları
+    $('btn-send').classList.toggle('hidden', !bridge.available);
+    $('btn-save-photo').classList.toggle('hidden', bridge.available);
+    $('btn-save-video').classList.toggle('hidden', bridge.available);
+    $('save-hint').classList.toggle('hidden', bridge.available);
     startMerge();
     if (S.merged) setMergeState('done', 1);
     showScreen('result');
@@ -639,23 +650,16 @@ async function send() {
       await startMerge();
     }
     const merged = S.merged;
-    if (bridge.available) {
-      showBusy('Gönderiliyor…');
-      const imageId = await bridge.sendBlob('image', S.resultBlob, { ...S.resultSize });
-      let videoId = null;
-      if (merged) {
-        videoId = await bridge.sendBlob('video', merged.blob, { duration: merged.duration, clips: S.clips.length }, (p) =>
-          setBusyText(`Video gönderiliyor %${Math.round(p * 100)}`),
-        );
-      }
-      bridge.post({ type: 'result.complete', imageId, videoId, clips: S.clips.length });
-      toast('Gönderildi');
-    } else {
-      const stamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-      download(S.resultBlob, `neocortex-perspektif-${stamp}.jpg`);
-      if (merged) download(merged.blob, `neocortex-video-${stamp}.${extensionFor(merged.mimeType)}`);
-      toast('İndirildi');
+    showBusy('Gönderiliyor…');
+    const imageId = await bridge.sendBlob('image', S.resultBlob, { ...S.resultSize });
+    let videoId = null;
+    if (merged) {
+      videoId = await bridge.sendBlob('video', merged.blob, { duration: merged.duration, clips: S.clips.length }, (p) =>
+        setBusyText(`Video gönderiliyor %${Math.round(p * 100)}`),
+      );
     }
+    bridge.post({ type: 'result.complete', imageId, videoId, clips: S.clips.length });
+    toast('Gönderildi');
   } catch (e) {
     console.error(e);
     toast('Gönderilemedi, tekrar dene.');
@@ -663,6 +667,35 @@ async function send() {
     hideBusy();
     btn.disabled = false;
   }
+}
+
+const stamp = () => new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+
+// Telefonda paylaşım menüsü açılır ("Görüntüyü Kaydet" / "Videoyu Kaydet" ile galeriye),
+// desteklenmezse dosya indirilir.
+async function saveFile(blob, name) {
+  try {
+    const file = new File([blob], name, { type: blob.type });
+    if (navigator.canShare && navigator.canShare({ files: [file] })) {
+      await navigator.share({ files: [file] });
+      return true;
+    }
+  } catch (e) {
+    if (e && e.name === 'AbortError') return false; // kullanıcı vazgeçti
+    console.warn('Paylaşım açılamadı, indirmeye geçiliyor', e);
+  }
+  download(blob, name);
+  toast('İndirildi');
+  return true;
+}
+
+function savePhoto() {
+  if (S.resultBlob) saveFile(S.resultBlob, `neocortex-perspektif-${stamp()}.jpg`);
+}
+
+function saveVideo() {
+  const m = S.merged;
+  if (m) saveFile(m.blob, `neocortex-video-${stamp()}.${extensionFor(m.mimeType)}`);
 }
 
 function download(blob, name) {
@@ -745,6 +778,8 @@ $('btn-result-back').addEventListener('click', () => {
   layoutStage();
 });
 $('btn-send').addEventListener('click', send);
+$('btn-save-photo').addEventListener('click', savePhoto);
+$('btn-save-video').addEventListener('click', saveVideo);
 $('btn-restart').addEventListener('click', askReset);
 window.addEventListener('resize', () => S.screen === 'perspective' && layoutStage());
 

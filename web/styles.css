@@ -153,7 +153,9 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .badge svg { width: 14px; height: 14px; }
 .badge.ok { background: var(--ok-bg); color: var(--ok); border: 1px solid var(--ok-b); }
 .badge.err { background: var(--danger-bg); color: var(--danger-t); }
-.result-img { width: 100%; height: auto; border-radius: 10px; background: var(--bg); }
+.result-img { width: 100%; height: auto; border-radius: 10px; background: var(--bg); display: block; -webkit-touch-callout: default; -webkit-user-select: auto; user-select: auto; }
+.save-hint { font-size: 12px; color: var(--muted); }
+.btn svg { width: 20px; height: 20px; }
 .result-video { width: 100%; border-radius: 10px; background: #000; max-height: 50vh; }
 .progress { height: 8px; border-radius: 99px; background: var(--navy-l); overflow: hidden; }
 .progress div { height: 100%; width: 0; background: var(--navy); transition: width .2s; }
