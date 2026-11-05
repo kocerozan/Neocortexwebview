@@ -61,3 +61,24 @@ test('dolap yoksa bir şey uydurmaz', () => {
   const img = new Uint8Array(w * h).map((_, i) => 140 + 25 * Math.sin((i % w) / 37) * Math.cos(Math.floor(i / w) / 53) + rnd() * 10);
   assert.equal(detectQuad(img, w, h), null);
 });
+
+function project(Wr, Hr, { yaw, pitch = 0, dist = 6, f = 300, cx = 160, cy = 120 }) {
+  const pts = [[-Wr / 2, -Hr / 2], [Wr / 2, -Hr / 2], [Wr / 2, Hr / 2], [-Wr / 2, Hr / 2]];
+  return pts.map(([X, Y]) => {
+    const x = X * Math.cos(yaw), z0 = X * Math.sin(yaw) + dist;
+    const y = Y * Math.cos(pitch) - z0 * Math.sin(pitch), z = Y * Math.sin(pitch) + z0 * Math.cos(pitch);
+    return { x: cx + (f * x) / z, y: cy + (f * y) / z };
+  });
+}
+
+test('çapraz çekilmiş (yamuk görünen) dolabı bulur', () => {
+  const w = 320, h = 240;
+  for (const [yaw, pitch, dist] of [[0.6, 0, 6], [-0.75, 0.1, 7.5], [0.9, 0, 6]]) {
+    const quad = project(4, 3, { yaw, pitch, dist });
+    assert.ok(quad.every((p) => p.x > 5 && p.y > 5 && p.x < w - 5 && p.y < h - 5), 'test dolabı görüntüye sığmalı');
+    const r = detectQuad(renderCabinet(w, h, quad, 11), w, h);
+    assert.ok(r, `yaw=${yaw}: dörtgen bulunamadı, beklenen ${JSON.stringify(quad.map((p) => [Math.round(p.x), Math.round(p.y)]))}`);
+    const err = maxErr(r.corners, quad);
+    assert.ok(err < 8, `yaw=${yaw}: köşe hatası ${err.toFixed(1)} px`);
+  }
+});

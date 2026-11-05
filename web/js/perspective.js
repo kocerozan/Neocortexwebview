@@ -42,11 +42,78 @@ export function applyHomography(H, x, y) {
 
 const dist = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
 
-/** Seçilen dörtgenden çıktı boyutu önerir. */
-export function suggestOutputSize(quad, maxSide = 3000) {
+const cross = (a, b) => [a[1] * b[2] - a[2] * b[1], a[2] * b[0] - a[0] * b[2], a[0] * b[1] - a[1] * b[0]];
+const dot3 = (a, b) => a[0] * b[0] + a[1] * b[1] + a[2] * b[2];
+
+/**
+ * Çapraz çekilmiş dikdörtgenin gerçek en/boy oranını tahmin eder
+ * (Zhang & He, "Whiteboard scanning and image enhancement", 2004).
+ * Kamera odak uzaklığı dörtgenden bulunur; asal nokta = görüntü merkezi.
+ * Telefon dik tutulup yatayda çapraz çekildiğinde dikey kenarlar paralel kalır ve odak
+ * dörtgenden bulunamaz; o zaman fPrior (tipik telefon kamerası) kullanılır.
+ * quad: sol-üst, sağ-üst, sağ-alt, sol-alt. Döner: { aspect, focal, focalSource } ya da null.
+ */
+export function estimateAspect(quad, center, fPrior = null) {
+  const [tl, tr, br, bl] = quad;
+  const m1 = [tl.x, tl.y, 1];
+  const m2 = [tr.x, tr.y, 1];
+  const m3 = [bl.x, bl.y, 1];
+  const m4 = [br.x, br.y, 1];
+  const c14 = cross(m1, m4);
+  const k2 = dot3(c14, m3) / dot3(cross(m2, m4), m3);
+  const k3 = dot3(c14, m2) / dot3(cross(m3, m4), m2);
+  if (!Number.isFinite(k2) || !Number.isFinite(k3)) return null;
+  const n2 = m2.map((v, i) => k2 * v - m1[i]);
+  const n3 = m3.map((v, i) => k3 * v - m1[i]);
+  const h2 = Math.hypot(n2[0], n2[1]);
+  const h3 = Math.hypot(n3[0], n3[1]);
+  const affine = h2 / h3;
+  const { x: u0, y: v0 } = center;
+  let f2 = NaN;
+  let focalSource = 'prior';
+  // İki kaybolma noktası da sonlu ise (≲1e6 px) odak dörtgenden hesaplanabilir
+  if (Math.abs(n2[2] * n3[2]) > 1e-12 * h2 * h3) {
+    f2 =
+      -(
+        n2[0] * n3[0] - (n2[0] * n3[2] + n2[2] * n3[0]) * u0 + n2[2] * n3[2] * u0 * u0 +
+        (n2[1] * n3[1] - (n2[1] * n3[2] + n2[2] * n3[1]) * v0 + n2[2] * n3[2] * v0 * v0)
+      ) / (n2[2] * n3[2]);
+    // Hesaplanan odak varsayılanla çok çelişiyorsa (gürültülü köşeler) güvenme
+    if (f2 > 0 && (!fPrior || (f2 > (fPrior * 0.4) ** 2 && f2 < (fPrior * 2.5) ** 2))) focalSource = 'quad';
+    else f2 = NaN;
+  }
+  if (!(f2 > 0)) {
+    if (!fPrior) return { aspect: affine, focal: null, focalSource: 'none' };
+    f2 = fPrior * fPrior;
+  }
+  const norm2 = (n) => ((n[0] - u0 * n[2]) ** 2 + (n[1] - v0 * n[2]) ** 2) / f2 + n[2] * n[2];
+  const aspect = Math.sqrt(norm2(n2) / norm2(n3));
+  if (!Number.isFinite(aspect) || aspect <= 0) return { aspect: affine, focal: null, focalSource: 'none' };
+  return { aspect, focal: Math.sqrt(f2), focalSource };
+}
+
+/** Tipik telefon ana kamerası (~26 mm eşdeğer, video kırpması dahil): f ≈ 0,75 × kare köşegeni */
+export function phoneFocal(frameW, frameH) {
+  return 0.75 * Math.hypot(frameW, frameH);
+}
+
+/**
+ * Seçilen dörtgenden çıktı boyutu önerir. center verilirse çapraz çekimde gerçek
+ * en/boy oranı kullanılır (uzaktaki kenarın kısalması telafi edilir).
+ */
+export function suggestOutputSize(quad, maxSide = 3000, center = null, fPrior = null) {
   const [tl, tr, br, bl] = quad;
   let W = Math.max(dist(tl, tr), dist(bl, br));
   let H = Math.max(dist(tl, bl), dist(tr, br));
+  if (center) {
+    const est = estimateAspect(quad, center, fPrior);
+    // Saçma sonuçlara karşı: kenar oranının 1/4'ü ile 4 katı arasında kalsın
+    if (est && est.aspect > (W / H) / 4 && est.aspect < (W / H) * 4) {
+      const area = W * H;
+      W = Math.sqrt(area * est.aspect);
+      H = W / est.aspect;
+    }
+  }
   const s = Math.min(1, maxSide / Math.max(W, H));
   W = Math.max(1, Math.round(W * s));
   H = Math.max(1, Math.round(H * s));

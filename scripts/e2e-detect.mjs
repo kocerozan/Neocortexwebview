@@ -1,13 +1,14 @@
 // Dolap algılama testi: dolaplı bir video yüklenir; canlı yeşil çerçeve ve
 // perspektif ekranında otomatik köşeler kontrol edilir.
-// Kullanım: node scripts/e2e-detect.mjs <dolap-video.mp4> [çıktı] [beklenen-oran-aralığı-json, ör. [1.25,1.45]]
+// Kullanım: node scripts/e2e-detect.mjs <dolap-video.mp4> [çıktı] [panoramadaki-dolap-oranı|-] [sonuç-oranı]
+//   ör. node scripts/e2e-detect.mjs dolap.mp4 out '[1.25,1.45]'   ·   node scripts/e2e-detect.mjs capraz.mp4 out - '[1.25,1.45]'
 import { createRequire } from 'node:module';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 const { chromium } = createRequire(import.meta.url)('playwright');
 
-const [video, outDir = '.', expectJson] = process.argv.slice(2);
+const [video, outDir = '.', expectJson, resultJson] = process.argv.slice(2);
 if (!video) { console.error('Kullanım: node scripts/e2e-detect.mjs <video.mp4> [çıktı] [beklenen]'); process.exit(2); }
 fs.mkdirSync(outDir, { recursive: true });
 const port = 8124;
@@ -38,7 +39,7 @@ try {
   check(st.auto, `perspektifte köşeler otomatik yerleşti — "${st.info}"`);
   const rel = st.c.map((p) => ({ x: +(p.x / st.w).toFixed(3), y: +(p.y / st.h).toFixed(3) }));
   console.log('otomatik köşeler (oransal):', JSON.stringify(rel));
-  if (expectJson) {
+  if (expectJson && expectJson !== '-') {
     // Panorama genişliği takibe bağlı (dokusuz duvarda daralır), o yüzden dolabın
     // en-boy oranını karşılaştır: beklenen [min, max]
     const [lo, hi] = JSON.parse(expectJson);
@@ -52,6 +53,12 @@ try {
   await page.waitForSelector('#screen-result:not(.hidden)', { timeout: 20000 });
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${outDir}/d3-sonuc.png` });
+  if (resultJson) {
+    // Düzleştirilmiş sonucun en-boy oranı dolabın gerçek oranına yakın olmalı
+    const [lo, hi] = JSON.parse(resultJson);
+    const rs = await page.evaluate(() => window.__neocortex.resultSize);
+    check(rs.width / rs.height >= lo && rs.width / rs.height <= hi, `düzleştirilmiş sonuç ${rs.width}×${rs.height}, oran ${(rs.width / rs.height).toFixed(2)} (beklenen ${lo}–${hi})`);
+  }
 } catch (e) { ok = false; console.error(e); }
 finally {
   if (errors.length) { ok = false; console.log('sayfa hataları:', errors); }

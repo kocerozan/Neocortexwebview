@@ -7,7 +7,7 @@ iOS (WKWebView) ve Android (WebView) uygulamalarına gömülen kamera ekranı:
 3. **Birleştirme:** "Bitir"e basınca
    - çekilen tüm video parçaları **tek bir videoda birleştirilir** (MP4, desteklenmiyorsa WebM),
    - videolardan alınan anahtar kareler tek bir **panorama görüntüsünde** birleştirilir.
-4. **Perspektif:** Panorama üzerindeki dört köşeyi teşhirin/rafın köşelerine taşırsın (büyüteç yardımcı olur). "Perspektifi uygula" ile görüntü **düz, önden bakış** haline getirilir.
+4. **Perspektif:** Dört köşe dolaba otomatik yerleşir ya da elle taşınır (büyüteç yardımcı olur). "Perspektifi uygula" çapraz çekilmiş dolabı **düz, karşıdan bakış** haline getirir. Uzaktaki kenarın kısa görünmesi telafi edilir: gerçek en/boy oranı kamera geometrisinden hesaplanır (Zhang & He yöntemi). Odak uzaklığı dörtgenden bulunamazsa tipik telefon kamerası varsayılır.
 5. **Video yükleme:** "Video yükle" ile galeriden bir video seçersin. Video kamera açıkmış gibi oynatılır: takip, mavi katman ve mini harita canlı çalışır. Kırmızı buton oynatmayı durdurur ya da devam ettirir. Bitir'den sonra akış aynıdır.
 6. **Dolap algılama:** Kamera ya da yüklenen video ekranında dolap kadraja tam girince yeşil çerçeve ve "Dolap algılandı" etiketi çıkar. Çerçeve kamera hareketiyle birlikte kayar. Perspektif ekranında dört köşe otomatik olarak dolabın köşelerine yerleşir ("Otomatik bul" ile yeniden aranır). Yöntem makine öğrenmesi değildir: kenar ve doğru tespitiyle güçlü, tutarlı kenarları olan en büyük dörtgen aranır. Ürün kenarlarından oluşan sahte çerçeveler kenar yönü, kontrast ve tekdüzelik kontrolleriyle elenir.
 7. **Analiz:** Sonuç ekranında kalite puanı (0-100), taranan alan, kapsama oranı, ortalama hız, hızlı anlar, takip kaybı, dikey sapma, kapsama haritası ve öneriler gösterilir.
@@ -40,7 +40,8 @@ scripts/serve.mjs     Yerel sunucu, scripts/e2e.mjs uçtan uca test
 npm start            # http://localhost:8080
 npm test             # birim testleri (takip, homografi)
 node scripts/e2e.mjs <sahte-kamera.y4m> e2e-out [video.mp4]
-node scripts/e2e-detect.mjs <dolapli-video.mp4> e2e-out '[1.25,1.45]'   # dolap algılama   # Chromium + sahte kamera (+ video yükleme) ile tüm akış
+node scripts/e2e-detect.mjs <dolapli-video.mp4> e2e-out '[1.25,1.45]'        # dolap algılama
+node scripts/e2e-detect.mjs <capraz-dolap.mp4> e2e-out - '[1.25,1.45]'      # çapraz çekimi düzleştirme   # Chromium + sahte kamera (+ video yükleme) ile tüm akış
 ```
 
 > Kamera (getUserMedia) yalnız **güvenli bağlamda** çalışır: `https://` ya da `localhost`. Telefonda denemek için sayfayı HTTPS bir sunucuya koy (veya bir HTTPS tünel kullan).

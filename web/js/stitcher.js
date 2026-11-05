@@ -68,5 +68,8 @@ export function stitchPanorama(items, { procW, procH, scale, maxSide = 4096, max
     tctx.drawImage(mask, 0, 0);
     ctx.drawImage(tmp, (it.x - minX) * s, (it.y - minY) * s);
   }
+  // Tek bir kamera karesinin panoramadaki boyutu (perspektifte odak uzaklığı tahmini için)
+  pano.tileW = tw;
+  pano.tileH = th;
   return pano;
 }

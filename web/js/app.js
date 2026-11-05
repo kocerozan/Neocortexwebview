@@ -1,6 +1,6 @@
 import { toGray, estimateShift, refinePositions } from './tracker.js';
 import { stitchPanorama } from './stitcher.js';
-import { warpPerspective, suggestOutputSize, isConvexQuad } from './perspective.js';
+import { warpPerspective, suggestOutputSize, isConvexQuad, phoneFocal } from './perspective.js';
 import { mergeClips, pickMimeType, extensionFor } from './merger.js';
 import { bridge } from './bridge.js';
 import { analyze } from './analysis.js';
@@ -19,8 +19,8 @@ const MASK_W = 3200;
 const MASK_H = 2400;
 const COVER_COLOR = '#2F80ED';
 const COVER_ALPHA = 0.42;
-const DET_W = 200; // dolap algılama karesi genişliği
-const DET_MS = 450; // canlı algılama aralığı
+const DET_W = 256; // dolap algılama karesi genişliği (daha küçükte ince kasalar kaybolur)
+const DET_MS = 500; // canlı algılama aralığı
 const DET_COLOR = '#34C759';
 
 const S = {
@@ -34,7 +34,7 @@ const S = {
   pano: null, corners: null, view: null,
   mergeGen: 0, mergePromise: null, merged: null, resultBlob: null, resultSize: null,
   mode: 'camera', upload: null, stats: null, analysis: null, lastT: 0,
-  det: null, lastDet: 0, detCtx: null, detGray: null, cornersAuto: false,
+  det: null, lastDet: 0, detCtx: null, detGray: null, cornersAuto: false, cornersTouched: false,
 };
 const newDet = () => ({ q: null, pos: { x: 0, y: 0 }, hits: 0, misses: 0, shown: false });
 S.det = newDet();
@@ -495,6 +495,7 @@ function resetAll() {
   S.analysis = null;
   S.det = newDet();
   S.cornersAuto = false;
+  S.cornersTouched = false;
   $('chip-det').classList.add('hidden');
   S.hasPrev = false;
   if (S.mode === 'upload') leaveUpload();
@@ -848,6 +849,14 @@ function openPerspective() {
   layoutStage();
 }
 
+// Çıktı boyutu: çapraz çekimde gerçek en/boy oranı (uzaktaki kenarın kısalması telafi edilir).
+// Asal nokta panorama merkezi, varsayılan odak tek kamera karesinin boyutundan.
+function outputSize(maxSide = 3000) {
+  const center = { x: S.pano.width / 2, y: S.pano.height / 2 };
+  const f = phoneFocal(S.pano.tileW || S.pano.width, S.pano.tileH || S.pano.height);
+  return suggestOutputSize(S.corners, maxSide, center, f);
+}
+
 // Panoramada dolabı bul ve köşeleri oraya koy.
 function autoCorners() {
   if (!S.pano) return false;
@@ -858,6 +867,7 @@ function autoCorners() {
   if (!r) return false;
   S.corners = r.corners.map((p) => ({ x: p.x / k, y: p.y / k }));
   S.cornersAuto = true;
+  S.cornersTouched = false;
   return true;
 }
 
@@ -888,8 +898,12 @@ function positionHandles() {
   const ok = isConvexQuad(S.corners);
   const info = $('persp-info');
   info.classList.toggle('error', !ok);
-  if (ok) {
-    const { width, height } = suggestOutputSize(S.corners);
+  const notFound = ok && !S.cornersAuto && !S.cornersTouched;
+  info.classList.toggle('warn', notFound);
+  if (notFound) {
+    info.textContent = 'Dolap otomatik bulunamadı. Dört köşeyi dolabın köşelerine sürükle; çapraz çekimde dolap düz, karşıdan görünüme çevrilir.';
+  } else if (ok) {
+    const { width, height } = outputSize();
     info.textContent = `${S.cornersAuto ? 'Dolap otomatik bulundu, köşeleri kontrol et · ' : ''}Çıktı: ${width} × ${height} px`;
   } else info.textContent = 'Köşeler çaprazlandı. Sırayı koru: sol-üst, sağ-üst, sağ-alt, sol-alt.';
   $('btn-apply').disabled = !ok;
@@ -941,6 +955,7 @@ handles.forEach((h, i) => {
     const x = (e.clientX - r.left - grab.x - S.view.left) / S.view.s;
     const y = (e.clientY - r.top - grab.y - S.view.top) / S.view.s;
     S.cornersAuto = false;
+    S.cornersTouched = true;
     S.corners[i] = {
       x: Math.max(0, Math.min(S.pano.width, x)),
       y: Math.max(0, Math.min(S.pano.height, y)),
@@ -964,7 +979,7 @@ async function applyPerspective() {
   try {
     const pc = $('pano');
     const src = pc.getContext('2d').getImageData(0, 0, pc.width, pc.height);
-    const { width, height } = suggestOutputSize(S.corners, 3000);
+    const { width, height } = outputSize(3000);
     const out = warpPerspective(src, S.corners, width, height);
     const rc = $('result-canvas');
     rc.width = width;

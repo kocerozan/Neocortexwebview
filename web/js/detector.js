@@ -50,6 +50,20 @@ function intersect(a, b) {
   return { x: (a.r * b.s - a.s * b.r) / det, y: (a.c * b.r - a.r * b.c) / det };
 }
 
+// Hızlı ön eleme: segment üzerindeki kenar pikseli oranı.
+function hitRatio(map, w, h, A, B) {
+  const len = Math.hypot(B.x - A.x, B.y - A.y);
+  const n = Math.max(16, Math.floor(len / 2));
+  let hit = 0;
+  for (let i = 0; i <= n; i++) {
+    const t = i / n;
+    const x = Math.round(A.x + (B.x - A.x) * t);
+    const y = Math.round(A.y + (B.y - A.y) * t);
+    if (x >= 0 && y >= 0 && x < w && y < h && map[y * w + x]) hit++;
+  }
+  return hit / (n + 1);
+}
+
 // Kenar desteği ve polaritesi. A→B saat yönünde (ekran koordinatı) verilir;
 // iç normal (-dy, dx). pol > 0: iç taraf daha açık, pol < 0: iç taraf daha koyu.
 // Ürün/raf kenarlarından oluşan sahte doğrularda polarite sürekli değişir (pol ≈ 0).
@@ -67,7 +81,7 @@ function support(map, G, w, h, A, B) {
   let oJ = 0;
   let pi = -1;
   let po = -1;
-  const off = 3;
+  const off = Math.min(w, h) < 200 ? 2 : 3; // küçük karede kasa şeridi ince
   for (let i = 0; i <= n; i++) {
     const t = i / n;
     const x = Math.round(A.x + (B.x - A.x) * t);
@@ -243,7 +257,8 @@ export function houghLines(gray, w, h, { edgeQuantile = 0.88, minVotesFrac = 0.1
       let th = Math.atan2(gyA[i], gxA[i]);
       if (th < 0) th += Math.PI;
       const ti = Math.round((th * 180) / Math.PI) % 180;
-      for (let d = -2; d <= 2; d++) {
+      // Piksel başına yön gürültülüdür (basamaklı/eğik kenarlar, sensör gürültüsü): ±7° aralığa oy ver
+      for (let d = -7; d <= 7; d++) {
         const t = (ti + d + nT) % nT;
         const r = Math.round(x * cos[t] + y * sin[t]) + diag;
         votes[t * nR + r]++;
@@ -302,7 +317,7 @@ export function houghLines(gray, w, h, { edgeQuantile = 0.88, minVotesFrac = 0.1
 export function detectQuad(gray, w, h, { maxPerAxis = 12, minAreaFrac = 0.12, minEdgeSupport = 0.5, minPolarity = 0.6, minContrastRatio = 0.35, maxFlatRatio = 0.12, margin = 0.03 } = {}) {
   const { lines, pts, eH, eV, G } = houghLines(gray, w, h);
   // Doğrunun normal açısı ~90° → yatay doğru, ~0°/180° → dikey doğru
-  const H = lines.filter((l) => l.theta >= 55 && l.theta <= 125).slice(0, maxPerAxis).map((l) => refineLine(l, pts, 1));
+  const H = lines.filter((l) => l.theta >= 40 && l.theta <= 140).slice(0, maxPerAxis).map((l) => refineLine(l, pts, 1));
   const V = lines.filter((l) => l.theta <= 35 || l.theta >= 145).slice(0, maxPerAxis).map((l) => refineLine(l, pts, 2));
   if (H.length < 2 || V.length < 2) return null;
   H.sort((a, b) => (a.r - a.c * (w / 2)) / a.s - (b.r - b.c * (w / 2)) / b.s);
@@ -311,23 +326,55 @@ export function detectQuad(gray, w, h, { maxPerAxis = 12, minAreaFrac = 0.12, mi
   const mx = w * margin;
   const my = h * margin;
   const inside = (p) => p && p.x >= -mx && p.y >= -my && p.x <= w + mx && p.y <= h + my;
+  // Önbellek: kesişimler ve kenar oranları birçok aday dörtgende tekrar eder
+  const nH = H.length;
+  const nV = V.length;
+  const P = [];
+  for (let i = 0; i < nH; i++) P.push(V.map((v) => intersect(H[i], v)));
+  const hCache = new Float32Array(nH * nV * nV).fill(-1); // yatay kenar: H[i], V[k]..V[l] arası
+  const vCache = new Float32Array(nV * nH * nH).fill(-1); // dikey kenar: V[k], H[i]..H[j] arası
+  const hSide = (i, k, l) => {
+    const key = (i * nV + k) * nV + l;
+    if (hCache[key] < 0) hCache[key] = hitRatio(eH, w, h, P[i][k], P[i][l]);
+    return hCache[key];
+  };
+  const vSide = (k, i, j) => {
+    const key = (k * nH + i) * nH + j;
+    if (vCache[key] < 0) vCache[key] = hitRatio(eV, w, h, P[i][k], P[j][k]);
+    return vCache[key];
+  };
+  // Tam ölçümler de önbellekte. Yön: yatay kenar soldan sağa, dikey kenar yukarıdan aşağı.
+  // Ters yönde kullanılan kenarda polarite ve kontrast işaret değiştirir.
+  const hFull = new Map();
+  const vFull = new Map();
+  const flip = (e) => ({ s: e.s, pol: -e.pol, contrast: -e.contrast, flat: e.flat });
+  const hEdge = (i, k, l) => {
+    const key = (i * nV + k) * nV + l;
+    let e = hFull.get(key);
+    if (!e) hFull.set(key, (e = support(eH, G, w, h, P[i][k], P[i][l])));
+    return e;
+  };
+  const vEdge = (k, i, j) => {
+    const key = (k * nH + i) * nH + j;
+    let e = vFull.get(key);
+    if (!e) vFull.set(key, (e = support(eV, G, w, h, P[i][k], P[j][k])));
+    return e;
+  };
   let best = null;
-  for (let i = 0; i < H.length; i++) {
-    for (let j = i + 1; j < H.length; j++) {
-      for (let k = 0; k < V.length; k++) {
-        for (let l = k + 1; l < V.length; l++) {
-          const q = [intersect(H[i], V[k]), intersect(H[i], V[l]), intersect(H[j], V[l]), intersect(H[j], V[k])];
+  for (let i = 0; i < nH; i++) {
+    for (let j = i + 1; j < nH; j++) {
+      for (let k = 0; k < nV; k++) {
+        for (let l = k + 1; l < nV; l++) {
+          const q = [P[i][k], P[i][l], P[j][l], P[j][k]];
           if (!q.every(inside) || !convex(q)) continue;
           if (Math.min(q[1].x - q[0].x, q[2].x - q[3].x) < 0.15 * w) continue;
           if (Math.min(q[3].y - q[0].y, q[2].y - q[1].y) < 0.15 * h) continue;
           const areaFrac = polyArea(q) / (w * h);
           if (areaFrac < minAreaFrac) continue;
-          const e = [
-            support(eH, G, w, h, q[0], q[1]),
-            support(eV, G, w, h, q[1], q[2]),
-            support(eH, G, w, h, q[2], q[3]),
-            support(eV, G, w, h, q[3], q[0]),
-          ];
+          // Ucuz kontrol önce: her kenarda yeterince kenar pikseli yoksa pahalı ölçümlere girme
+          if (hSide(i, k, l) < minEdgeSupport || vSide(l, i, j) < minEdgeSupport || hSide(j, k, l) < minEdgeSupport || vSide(k, i, j) < minEdgeSupport)
+            continue;
+          const e = [hEdge(i, k, l), vEdge(l, i, j), flip(hEdge(j, k, l)), flip(vEdge(k, i, j))];
           const s = e.map((x) => x.s);
           const minS = Math.min(...s);
           if (minS < minEdgeSupport) continue;
