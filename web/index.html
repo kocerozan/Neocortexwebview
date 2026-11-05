@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover" />
+  <meta name="theme-color" content="#0B4A8B" />
+  <title>NeoCortex Kamera</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+<div id="app">
+
+  <!-- 1 · Kamera / video çekimi -->
+  <section id="screen-camera" class="screen camera">
+    <div class="cam-view" id="cam-view">
+      <video id="preview" playsinline muted autoplay></video>
+      <canvas id="overlay"></canvas>
+
+      <div class="cam-top">
+        <div class="info-panel">
+          <button class="icon-btn" id="btn-close" aria-label="Kapat">
+            <svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg>
+          </button>
+          <div class="info-text">
+            <div class="info-title" id="info-title">Teşhir videosu</div>
+            <div class="info-hint" id="info-hint">Kayda bas, alanı yavaşça tara. Çektiğin yerler maviye boyanır.</div>
+          </div>
+          <canvas id="minimap" width="192" height="128" aria-label="Kapsama haritası"></canvas>
+        </div>
+        <div class="chips">
+          <span class="chip" id="chip-clips">0 çekim</span>
+          <span class="chip" id="chip-time">00:00</span>
+          <span class="chip rec hidden" id="chip-rec"><i></i>KAYIT</span>
+          <span class="chip warn hidden" id="chip-speed">Çok hızlı, yavaşla</span>
+        </div>
+      </div>
+
+      <div class="cam-error hidden" id="cam-error">
+        <svg viewBox="0 0 24 24"><path d="M3 7h3l2-3h8l2 3h3v13H3z"/><path d="M3 3l18 18"/></svg>
+        <div class="cam-error-title">Kamera açılamadı</div>
+        <div class="cam-error-text" id="cam-error-text"></div>
+        <button class="btn btn-primary" id="btn-retry">Tekrar dene</button>
+      </div>
+    </div>
+
+    <div class="cam-bar">
+      <button class="bar-side" id="btn-reset" disabled>
+        <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2.3-5.6"/><path d="M4 4v4h4"/></svg>
+        <span>Sıfırla</span>
+      </button>
+      <button class="shutter" id="btn-record" aria-label="Kaydı başlat"><span class="shutter-inner"></span></button>
+      <button class="bar-side" id="btn-finish" disabled>
+        <svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>
+        <span>Bitir</span>
+      </button>
+    </div>
+  </section>
+
+  <!-- 2 · Perspektif düzeltme -->
+  <section id="screen-perspective" class="screen page hidden">
+    <header class="header">
+      <button class="icon-btn" id="btn-persp-back" aria-label="Çekime dön">
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <div>
+        <div class="h-title">Perspektif düzelt</div>
+        <div class="h-sub">Dört köşeyi teşhirin köşelerine taşı</div>
+      </div>
+    </header>
+    <div class="stage" id="stage">
+      <canvas id="pano"></canvas>
+      <svg id="quad" class="quad"><polygon id="quad-poly"/></svg>
+      <div class="handle" data-i="0"><i></i></div>
+      <div class="handle" data-i="1"><i></i></div>
+      <div class="handle" data-i="2"><i></i></div>
+      <div class="handle" data-i="3"><i></i></div>
+      <canvas id="loupe" class="loupe hidden" width="224" height="224"></canvas>
+    </div>
+    <div class="persp-info" id="persp-info"></div>
+    <div class="actions">
+      <button class="btn btn-primary" id="btn-apply">Perspektifi uygula</button>
+      <button class="btn btn-secondary" id="btn-continue">Çekime devam et</button>
+    </div>
+  </section>
+
+  <!-- 3 · Sonuç -->
+  <section id="screen-result" class="screen page hidden">
+    <header class="header">
+      <button class="icon-btn" id="btn-result-back" aria-label="Köşelere dön">
+        <svg viewBox="0 0 24 24"><path d="M15 5l-7 7 7 7"/></svg>
+      </button>
+      <div>
+        <div class="h-title">Çekim sonucu</div>
+        <div class="h-sub" id="result-sub"></div>
+      </div>
+    </header>
+    <div class="content">
+      <div class="card">
+        <div class="card-head">
+          <span class="badge ok"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg>Perspektif alındı</span>
+          <span class="muted" id="result-size"></span>
+        </div>
+        <canvas id="result-canvas" class="result-img"></canvas>
+      </div>
+      <div class="card">
+        <div class="card-head">
+          <span class="badge" id="merge-badge">Videolar birleştiriliyor</span>
+          <span class="muted" id="merge-meta"></span>
+        </div>
+        <div class="progress" id="merge-progress"><div id="merge-bar"></div></div>
+        <video id="merged-video" class="result-video hidden" controls playsinline></video>
+        <div class="merge-error hidden" id="merge-error"></div>
+      </div>
+    </div>
+    <div class="actions">
+      <button class="btn btn-primary" id="btn-send">Gönder</button>
+      <button class="btn btn-danger" id="btn-restart">Baştan çek</button>
+    </div>
+  </section>
+
+  <div class="busy hidden" id="busy">
+    <div class="spinner"></div>
+    <div class="busy-text" id="busy-text">Lütfen bekle…</div>
+  </div>
+
+  <div class="sheet-backdrop hidden" id="sheet">
+    <div class="sheet" role="dialog" aria-modal="true">
+      <div class="sheet-grip"></div>
+      <div class="sheet-title" id="sheet-title"></div>
+      <div class="sheet-text" id="sheet-text"></div>
+      <div class="warn-box" id="sheet-warn"></div>
+      <button class="btn btn-danger-fill" id="sheet-ok"></button>
+      <button class="btn btn-secondary" id="sheet-cancel">Vazgeç</button>
+    </div>
+  </div>
+
+  <div class="toast hidden" id="toast"></div>
+</div>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>

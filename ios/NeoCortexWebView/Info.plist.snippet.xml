@@ -1,0 +1,6 @@
+<!-- Uygulamanın Info.plist dosyasına ekle -->
+<key>NSCameraUsageDescription</key>
+<string>Teşhir videosu çekmek için kameraya erişim gerekiyor.</string>
+<!-- Videolar fotoğraf arşivine kaydedilecekse: -->
+<key>NSPhotoLibraryAddUsageDescription</key>
+<string>Çektiğin videoyu ve perspektif görüntüsünü galeriye kaydetmek için.</string>

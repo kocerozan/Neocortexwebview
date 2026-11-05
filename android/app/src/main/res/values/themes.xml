@@ -1,0 +1,7 @@
+<resources>
+    <style name="Theme.NeoCortex" parent="Theme.AppCompat.NoActionBar">
+        <item name="android:windowBackground">@android:color/black</item>
+        <item name="android:statusBarColor">#0B4A8B</item>
+        <item name="android:navigationBarColor">#2A2E35</item>
+    </style>
+</resources>

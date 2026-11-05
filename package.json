@@ -1,0 +1,12 @@
+{
+  "name": "neocortex-webview",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "NeoCortex iOS/Android WebView kamera modülü: video çekimi, mavi kapsama katmanı, video birleştirme ve perspektif düzeltme",
+  "scripts": {
+    "start": "node scripts/serve.mjs",
+    "test": "node --test tests/*.test.mjs",
+    "test:e2e": "node scripts/e2e.mjs"
+  }
+}

@@ -1,0 +1,14 @@
+node_modules/
+.DS_Store
+# Android
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+*.iml
+.idea/
+# iOS
+xcuserdata/
+DerivedData/
+# test çıktıları
+e2e-out/

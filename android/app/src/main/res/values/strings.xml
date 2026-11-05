@@ -1,0 +1,4 @@
+<resources>
+    <string name="app_name">NeoCortex Kamera</string>
+    <string name="camera_denied">Kamera izni olmadan video çekilemez.</string>
+</resources>
