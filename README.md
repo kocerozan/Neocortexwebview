@@ -27,6 +27,7 @@ web/                  Webview içeriği (derleme gerektirmez, saf ES modülleri)
   js/perspective.js   Homografi ve perspektif düzeltme
   js/detector.js      Dolap çerçevesi algılama (Hough doğruları + dörtgen seçimi)
   js/analysis.js      Çekim kalitesi analizi
+  js/changelog.js     Sürüm notları (Yenilikler kartı)
   js/bridge.js        iOS/Android mesaj köprüsü
 ios/NeoCortexWebView/ Swift: NeoCortexWebViewController + örnek kullanım
 android/              Kotlin örnek uygulama (web/ klasörü APK'ya gömülür)
@@ -97,6 +98,12 @@ launcher.launch(Intent(this, NeoCortexWebViewActivity::class.java)
 iOS: `window.webkit.messageHandlers.neocortex.postMessage(obj)` · Android: `window.NeoCortexAndroid.postMessage(JSON.stringify(obj))`
 
 Native → Web: `window.NeoCortex.reset()`, `window.NeoCortex.setInfo({ title, hint })`. URL parametreleri: `?title=...&hint=...`
+
+## Yenilikler kartı ve sürümler
+
+Sayfa açılınca üstte "Yenilikler" kartı çıkar. Kart, o cihazda son görülen sürümden bu yana eklenenleri gösterir (ilk ziyarette yalnız son sürüm). "Tamam" deyince bir sonraki sürüme kadar çıkmaz. Kamera ekranındaki sürüm etiketine (ör. `v1.5`) dokununca tüm sürüm notları açılır.
+
+Yeni sürüm çıkarırken `web/js/changelog.js` dosyasında `APP_VERSION` değerini artır ve `CHANGELOG` listesinin en üstüne o sürümün maddelerini ekle. `npm test` sıralamayı ve sürüm tutarlılığını kontrol eder.
 
 ## Teknik notlar ve sınırlar
 

@@ -23,6 +23,7 @@ const check = (c, m) => { console.log(`${c ? 'OK  ' : 'FAIL'} ${m}`); if (!c) ok
 try {
   await page.goto(`http://localhost:${port}/?title=Dik%20dolap%20%238069`);
   await page.waitForFunction(() => window.NeoCortex, null, { timeout: 10000 });
+  if (await page.isVisible('#whatsnew')) await page.click('#wn-ok');
   await page.setInputFiles('#file-input', path.resolve(video));
   await page.waitForFunction(() => window.__neocortex.mode === 'upload' && window.__neocortex.recording, null, { timeout: 10000 });
   const seen = await page.waitForFunction(() => window.__neocortex.det.shown, null, { timeout: 15000 }).then(() => true, () => false);

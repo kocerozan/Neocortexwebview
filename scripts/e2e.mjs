@@ -36,6 +36,13 @@ const check = (cond, msg) => { console.log(`${cond ? 'OK  ' : 'FAIL'} ${msg}`); 
 try {
   await page.goto(`http://localhost:${port}/?title=Gondol%20%238069`);
   await page.waitForFunction(() => window.__neocortex.vw > 0, null, { timeout: 10000 });
+  // Yenilikler kartı: ilk açılışta görünür, Tamam'dan sonra yenilemede çıkmaz
+  check(await page.isVisible('#whatsnew'), 'yenilikler kartı ilk açılışta üstte görünüyor');
+  await page.screenshot({ path: `${outDir}/0-yenilikler.png` });
+  await page.click('#wn-ok');
+  await page.reload();
+  await page.waitForFunction(() => window.__neocortex.vw > 0, null, { timeout: 10000 });
+  check(!(await page.isVisible('#whatsnew')), 'Tamam sonrası sayfa yenilenince tekrar çıkmıyor');
   await wait(500);
   const p0 = await pos();
   await page.click('#btn-record');

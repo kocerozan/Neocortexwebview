@@ -5,6 +5,7 @@ import { mergeClips, pickMimeType, extensionFor } from './merger.js';
 import { bridge } from './bridge.js';
 import { analyze } from './analysis.js';
 import { detectQuad } from './detector.js';
+import { APP_VERSION, CHANGELOG, entriesToShow } from './changelog.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -1189,4 +1190,64 @@ S.defaultHint = params.get('hint') || $('info-hint').textContent;
 if (params.get('title')) $('info-title').textContent = params.get('title');
 S.screen = 'camera';
 
-startCamera().then(() => bridge.post({ type: 'ready', version: 1, platform: bridge.platform }));
+// ---------------- Yenilikler ----------------
+
+const SEEN_KEY = 'neocortex.lastSeenVersion';
+const readSeen = () => {
+  try {
+    return localStorage.getItem(SEEN_KEY);
+  } catch {
+    return null;
+  }
+};
+const writeSeen = (v) => {
+  try {
+    localStorage.setItem(SEEN_KEY, v);
+  } catch {
+    /* gizli sekme vb. — her açılışta yeniden gösterilir */
+  }
+};
+
+function showWhatsNew(entries, { all = false } = {}) {
+  if (!entries.length) return;
+  $('wn-title').textContent = all ? 'Sürüm notları' : 'Yenilikler';
+  $('wn-sub').textContent = all ? `Şu anki sürüm v${APP_VERSION}` : `v${APP_VERSION} sürümüne güncellendi`;
+  $('wn-body').replaceChildren(
+    ...entries.map((e) => {
+      const box = document.createElement('div');
+      box.className = 'wn-version';
+      const head = document.createElement('div');
+      head.className = 'wn-version-head';
+      const b = document.createElement('span');
+      b.className = 'badge';
+      b.textContent = `v${e.version}`;
+      const d = document.createElement('span');
+      d.className = 'muted';
+      d.textContent = e.date;
+      head.append(b, d);
+      const ul = document.createElement('ul');
+      for (const it of e.items) {
+        const li = document.createElement('li');
+        li.textContent = it;
+        ul.append(li);
+      }
+      box.append(head, ul);
+      return box;
+    }),
+  );
+  $('whatsnew').classList.remove('hidden');
+}
+
+function closeWhatsNew() {
+  $('whatsnew').classList.add('hidden');
+  writeSeen(APP_VERSION);
+}
+
+$('wn-ok').addEventListener('click', closeWhatsNew);
+$('wn-close').addEventListener('click', closeWhatsNew);
+$('chip-version').textContent = `v${APP_VERSION}`;
+$('chip-version').addEventListener('click', () => showWhatsNew(CHANGELOG, { all: true }));
+showWhatsNew(entriesToShow(readSeen()));
+window.NeoCortex.version = APP_VERSION;
+
+startCamera().then(() => bridge.post({ type: 'ready', version: 1, appVersion: APP_VERSION, platform: bridge.platform }));

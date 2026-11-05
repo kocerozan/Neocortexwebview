@@ -28,6 +28,7 @@
           <canvas id="minimap" width="192" height="128" aria-label="Kapsama haritası"></canvas>
         </div>
         <div class="chips">
+          <button class="chip chip-btn" id="chip-version" aria-label="Yenilikleri göster">v–</button>
           <span class="chip" id="chip-clips">0 çekim</span>
           <span class="chip" id="chip-time">00:00</span>
           <span class="chip rec hidden" id="chip-rec"><i></i><span id="chip-rec-text">KAYIT</span></span>
@@ -170,6 +171,21 @@
       <div class="warn-box" id="sheet-warn"></div>
       <button class="btn btn-danger-fill" id="sheet-ok"></button>
       <button class="btn btn-secondary" id="sheet-cancel">Vazgeç</button>
+    </div>
+  </div>
+
+  <div class="whatsnew hidden" id="whatsnew" role="dialog" aria-modal="false" aria-labelledby="wn-title">
+    <div class="wn-card">
+      <div class="wn-head">
+        <div class="wn-icon"><svg viewBox="0 0 24 24"><path d="M12 3l2.2 5.6L20 9.3l-4.5 3.9L17 19l-5-3-5 3 1.5-5.8L4 9.3l5.8-.7z"/></svg></div>
+        <div class="wn-titles">
+          <div class="wn-title" id="wn-title">Yenilikler</div>
+          <div class="wn-sub" id="wn-sub"></div>
+        </div>
+        <button class="icon-btn wn-close" id="wn-close" aria-label="Kapat"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button>
+      </div>
+      <div class="wn-body" id="wn-body"></div>
+      <button class="btn btn-primary wn-ok" id="wn-ok">Tamam</button>
     </div>
   </div>
 
