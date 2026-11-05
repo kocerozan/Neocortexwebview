@@ -15,6 +15,10 @@ iOS (WKWebView) ve Android (WebView) uygulamalarına gömülen kamera ekranı:
 
 Görsel dil NeoCortex mobil kurallarına göre hazırlandı: lacivert `#0B4A8B`, kamera barı `#2A2E35`, 88px deklanşör, alttan açılan onay paneli.
 
+## Canlı test linki
+
+**https://kocerozan.github.io/Neocortexwebview/** (kısa link, kamera sayfasına yönlendirir; `?title=...&hint=...` parametreleri korunur). Doğrudan adres: https://kocerozan.github.io/Neocortexwebview/web/
+
 ## Klasörler
 
 ```
