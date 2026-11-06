@@ -79,6 +79,11 @@ export function analyze(st) {
     { label: 'Dikey sapma', value: nf(yDrift, 2), hint: 'kadraj (düşük = düz)' },
     { label: 'Anahtar kare', value: String(st.keyframes || 0), hint: 'panoramaya giren' },
   ];
+  if (st.door) {
+    const v = { open: 'Açık', closed: 'Kapalı', unknown: 'Bilinmiyor' }[st.door.state] || 'Bilinmiyor';
+    const hint = st.door.opened || st.door.closed ? `${st.door.opened} kez açıldı, ${st.door.closed} kez kapandı` : st.door.confident ? 'çekim sonunda' : 'tahmin, kapak hareketi görülmedi';
+    metrics.push({ label: 'Kapak', value: v, hint });
+  }
 
   return { score, level, label, metrics, tips, raw: { fill, fastRatio, lostRatio, avgSpeed, yDrift, coverW, coverH } };
 }

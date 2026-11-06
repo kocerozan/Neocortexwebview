@@ -65,6 +65,9 @@ try {
   check(onRatio > 0.95, 'yaklaşma ve yakın çekim boyunca kilit korundu');
   check(maxE < 0.06, `kilitli çerçeve gerçek dolaba oturuyor (en büyük sapma köşegenin %${(maxE * 100).toFixed(1)}'i)`);
   check(late.length > 0, 'yakın çekim aşamasında da ölçüldü');
+  // Kapaksız dolap: yaklaşma/kaydırma kapak olayı üretmemeli
+  const doorEv = await page.evaluate(() => (window.__neocortex.door ? window.__neocortex.door.events.map((e) => `${e.t.toFixed(1)}:${e.type}`) : []));
+  check(doorEv.length === 0, `yaklaşırken yanlış kapak olayı yok ${doorEv.length ? JSON.stringify(doorEv) : ''}`);
 
   await page.click('#btn-finish');
   await page.waitForSelector('#screen-result:not(.hidden)', { timeout: 60000 });

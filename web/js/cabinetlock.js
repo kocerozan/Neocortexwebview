@@ -103,7 +103,8 @@ export class CabinetLock {
     const diag = Math.hypot(q[2].x - q[0].x, q[2].y - q[0].y);
     const d = Math.max(...quad.map((p, i) => Math.hypot(p.x - q[i].x, p.y - q[i].y)));
     if (d < 0.08 * diag) {
-      this.tracker.quad = q.map((p, i) => ({ x: (p.x + quad[i].x) / 2, y: (p.y + quad[i].y) / 2 }));
+      // Yumuşak düzeltme: ani sıçrama kapak tespitini ve mavi katmanı oynatmasın
+      this.tracker.quad = q.map((p, i) => ({ x: p.x * 0.7 + quad[i].x * 0.3, y: p.y * 0.7 + quad[i].y * 0.3 }));
       this._addAspect(quad);
       return 'corrected';
     }

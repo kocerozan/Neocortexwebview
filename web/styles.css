@@ -251,3 +251,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .wn-version-head .muted { font-weight: 400; font-size: 12px; }
 .wn-version ul { margin: 0; padding-left: 18px; font-size: 14px; line-height: 1.45; display: flex; flex-direction: column; gap: 3px; }
 .wn-ok { height: 48px; }
+
+/* ---------- Kapak durumu ---------- */
+.chip.door svg { width: 14px; height: 14px; }
+.chip.door.open { background: #fff; color: var(--navy-t); }
+.chip.door.paused { opacity: .6; }

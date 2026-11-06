@@ -8,6 +8,7 @@ import { detectQuad } from './detector.js';
 import { APP_VERSION, CHANGELOG, entriesToShow } from './changelog.js';
 import { CabinetLock } from './cabinetlock.js';
 import { applyH } from './homotrack.js';
+import { DoorMonitor, sampleRect } from './door.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -40,6 +41,7 @@ const S = {
   mode: 'camera', upload: null, stats: null, analysis: null, lastT: 0,
   det: null, lastDet: 0, detCtx: null, detGray: null, cornersAuto: false, cornersTouched: false,
   lock: null, lockNewClip: false, lockArmed: true, rectified: false, rectFilled: 0,
+  door: null, detRGBA: null, doorTick: 0,
 };
 const newDet = () => ({ q: null, pos: { x: 0, y: 0 }, hits: 0, misses: 0, shown: false });
 S.det = newDet();
@@ -183,7 +185,9 @@ function grayOf(source, w, h) {
   ctx.fillStyle = '#808080'; // panoramadaki saydam alanlar sahte kenar üretmesin
   ctx.fillRect(0, 0, w, h);
   ctx.drawImage(source, 0, 0, w, h);
-  return toGray(ctx.getImageData(0, 0, w, h).data, S.detGray);
+  const rgba = ctx.getImageData(0, 0, w, h).data;
+  S.detRGBA = rgba; // kapak tespiti renkli örnek alır
+  return toGray(rgba, S.detGray);
 }
 
 // Takip karesi (DET_W genişlik): kilitliyken her karede, değilse algılama zamanında alınır.
@@ -201,6 +205,7 @@ function lockAndDetect(v) {
   const g = grayOf(v, dw, dh);
   if (L.active) {
     L.update(g);
+    if (L.okThisFrame) checkDoor(v, dw, dh);
     if (L.state === 'lost') {
       updateLockChip();
       toast('Dolap takibi kayboldu. Dolabın tamamını kadraja al, kendiliğinden devam eder.');
@@ -233,6 +238,29 @@ function lockAndDetect(v) {
     S.lastDet = now;
     maybeDetect(g, dw, dh);
   }
+}
+
+// Kapak durumu: kilitli dolabın düz görüntüsünden 2 karede bir örnek (≈15/sn)
+function checkDoor(v, dw, dh) {
+  if (!S.door || !S.detRGBA) return;
+  if (++S.doorTick % 2) return;
+  const t = S.mode === 'upload' ? v.currentTime : performance.now() / 1000;
+  const ev = S.door.update(sampleRect(S.detRGBA, dw, dh, S.lock.Ginv(), 64, 48), t);
+  if (ev === 'opened') toast('Kapak açıldı');
+  if (ev === 'closed') toast('Kapak kapandı');
+  updateDoorChip();
+}
+
+function updateDoorChip() {
+  const chip = $('chip-door');
+  const D = S.door;
+  chip.classList.toggle('hidden', !(S.lock && S.lock.used && D));
+  if (!D) return;
+  const txt = D.moving ? 'Kapak hareket ediyor…' : D.state === 'open' ? 'Kapak: açık' : D.state === 'closed' ? 'Kapak: kapalı' : 'Kapak: ?';
+  chip.classList.toggle('paused', D.paused); // yakın çekimde değerlendirme duraklar
+  if ($('chip-door-text').textContent !== txt) $('chip-door-text').textContent = txt;
+  chip.classList.toggle('open', D.state === 'open' && !D.moving);
+  chip.title = D.confidence === 'high' ? 'Kapak hareketi görüldü' : 'Tahmin (kapak hareketi henüz görülmedi)';
 }
 
 function captureLockKeyframe(v, k) {
@@ -281,9 +309,11 @@ async function askUnlock() {
   });
   if (!yes) return;
   S.lock = null;
+  S.door = null;
   S.lockArmed = false; // dolap kadrajdan çıkana kadar yeniden kilitleme
   S.det = newDet();
   updateLockChip();
+  updateDoorChip();
 }
 
 function maybeDetect(g, dw, dh) {
@@ -316,11 +346,15 @@ function maybeDetect(g, dw, dh) {
     if (L.state === 'on') L.onDetection(r.corners, g);
     else if (shown && S.lockArmed) {
       const res = L.onDetection(r.corners, g);
-      if (res === 'locked') toast('Dolap kilitlendi. Yaklaşıp yakın çekim yapabilirsin, çerçeve dolabın üstünde kalır.');
+      if (res === 'locked') {
+        S.door = new DoorMonitor();
+        toast('Dolap kilitlendi. Yaklaşıp yakın çekim yapabilirsin, çerçeve dolabın üstünde kalır.');
+      }
       if (res === 'relocked') toast('Dolap yeniden bulundu.');
     }
   }
   updateLockChip();
+  updateDoorChip();
 }
 
 function drawDetection(ctx, ox, oy, fw, fh) {
@@ -711,9 +745,11 @@ function resetAll() {
   S.cornersAuto = false;
   S.cornersTouched = false;
   S.lock = null;
+  S.door = null;
   S.lockArmed = true;
   S.rectified = false;
   updateLockChip();
+  updateDoorChip();
   S.hasPrev = false;
   if (S.mode === 'upload') leaveUpload();
   showScreen('camera');
@@ -1035,6 +1071,14 @@ function computeAnalysis() {
     coverH,
     fill: S.rectified ? S.lock.coverage() : coverageFill(),
     cabinet: S.rectified,
+    door: S.door
+      ? {
+          state: S.door.state,
+          opened: S.door.events.filter((e) => e.type === 'opened').length,
+          closed: S.door.events.filter((e) => e.type === 'closed').length,
+          confident: S.door.confidence === 'high',
+        }
+      : null,
     keyframes: S.rectified ? S.lock.kfs.length : S.keyframes.length,
   });
 }

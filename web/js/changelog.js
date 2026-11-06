@@ -1,9 +1,18 @@
 // Sürüm notları. Yeni sürüm çıkınca en üste ekle ve APP_VERSION'ı güncelle.
 // Sayfa açılınca, bu cihazda son görülen sürümden yeni olan maddeler üstte gösterilir.
 
-export const APP_VERSION = '1.6';
+export const APP_VERSION = '1.7';
 
 export const CHANGELOG = [
+  {
+    version: '1.7',
+    date: '6 Kasım 2026',
+    items: [
+      'Kapak tespiti (deneme): dolap kilitliyken kapağın açıldığı ve kapandığı anlaşılır; "Kapak: açık / kapalı" etiketi ve bildirim.',
+      'Kapak hareketi görülene kadar durum "?" gösterilir; yakın çekimde değerlendirme duraklar.',
+      'Sonuç analizinde kapak durumu ve kaç kez açılıp kapandığı.',
+    ],
+  },
   {
     version: '1.6',
     date: '6 Kasım 2026',
