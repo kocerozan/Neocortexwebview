@@ -111,11 +111,12 @@ const avgF = (fs) => ({
 });
 
 /** Açıklık göstergesi: önceki → sonraki görünüm değişimi (pozitif = daha "açık") */
+// Not: parlak piksel oranı kullanılmaz: dolabın beyaz içi kapak açılınca "parlak" sayılıyor ve
+// sonucu ters çeviriyordu. Kontrast da yansıma bantlarından etkilendiği için yarım ağırlıkta.
 export function opennessDelta(before, after) {
   const r = Math.log((after.contrast + 1) / (before.contrast + 1));
   const s = Math.log((after.saturation + 0.02) / (before.saturation + 0.02));
-  const h = (after.highlights - before.highlights) * 8;
-  return r + s - h;
+  return s + 0.5 * r;
 }
 
 /**
@@ -129,11 +130,15 @@ export function opennessDelta(before, after) {
  * Yaklaşma / ışık değişimi gibi yavaş değişimler sıçrama üretmediği için olay üretmez.
  */
 export class DoorMonitor {
-  // Eşikler ölçümle seçildi: kapak dönerken fark 10-17, açıklık değişimi ±0,6-0,9; kapaksız
-  // dolaba yaklaşırken fark ≤8, değişim ≤0,21.
-  constructor({ moveDiff = 10, decide = 0.35, confirm = 4, swingWindow = 2.5, minVisible = 0.85 } = {}) {
+  // Eşikler sentetik videolarda ölçülerek seçildi: kapak dönerken örnek farkı 10-17 (kapaksız dolaba
+  // yaklaşırken ≤8); yansımalı camda kapak açılınca açıklık değişimi ≈ +0,3. Sahada ayar gerekebilir.
+  constructor({ moveDiff = 10, decide = 0.25, confirm = 4, swingWindow = 2.5, minVisible = 0.85 } = {}) {
     Object.assign(this, { moveDiff, decide, confirm, swingWindow, minVisible });
     this.paused = false;
+    this.glare = new GlareDetector();
+    this.reason = null; // 'hareket' | 'yansıma'
+    this.glareSince = null;
+    this.lastDecision = -Infinity; // son kapak olayı kararı zamanı
     this.state = 'unknown';
     this.confidence = 'low';
     this.prev = null;
@@ -150,12 +155,14 @@ export class DoorMonitor {
     this.t = 0;
   }
 
-  /** Arayüz için: kapak hareket ediyor mu (son 0,6 sn'de en az iki sıçrama; tek sıçrama titreme sayılır) */
+  /** Arayüz için: kapak hareket ediyor mu — son 0,6 sn'de en az iki sıçrama VE görünüm değişiyor
+   *  (kayan yansıma da sıçrama yapar ama görünümü kalıcı değiştirmez) */
   get moving() {
-    return this.spikes.filter((s) => this.t - s < 0.6).length >= 2;
+    return this.spikes.filter((s) => this.t - s < 0.6).length >= 2 && Math.abs(this.lastDelta) > 0.2;
   }
 
-  update(sample, t = 0) {
+  /** motion: son ~1 sn'de kameranın dolaba göre hareketi (dolap köşegeni oranı) */
+  update(sample, t = 0, motion = 0) {
     this.t = t;
     if (sample.visible < this.minVisible) {
       // Dolabın tamamı görünmüyor (yakın çekim): kapak değerlendirmesi duraklar, durum korunur
@@ -168,6 +175,7 @@ export class DoorMonitor {
     if (this.paused) {
       // Yakın çekimden dönüş: görünüm değişti, referansı yeniden kur (olay üretme)
       this.paused = false;
+      this.glare.reset();
       this.prev = null;
       this.recent = [];
       this.ref = null;
@@ -204,6 +212,23 @@ export class DoorMonitor {
       return null;
     }
 
+    // Camda yansıma (kayan yansıma da sıçrama ürettiği için hareketten bağımsız güncellenir)
+    let glareEv = null;
+    if (t - this.lastDecision > 2) {
+      this.glare.update(sample, motion);
+      if (this.glare.state === 'seen') {
+        if (this.glareSince === null) this.glareSince = t;
+        const longGlare = t - this.glareSince > 3 && this.glare.ema > 0.7;
+        // Bilinmiyorsa → kapalı; açık sanılıyorken uzun süre yansıma → kapanma kaçırılmış
+        if (this.state === 'unknown' || (this.state === 'open' && longGlare)) {
+          this.state = 'closed';
+          this.confidence = 'medium';
+          this.reason = 'yansıma';
+          glareEv = 'glare';
+        }
+      } else this.glareSince = null;
+    }
+
     const delta = opennessDelta(this.ref, cur);
     this.lastDelta = delta;
     if (delta > this.decide) this.run = this.run > 0 ? this.run + 1 : 1;
@@ -218,6 +243,9 @@ export class DoorMonitor {
         ev = dir === 'open' ? 'opened' : 'closed';
       }
       this.confidence = 'high';
+      this.reason = 'hareket';
+      this.lastDecision = t;
+      this.glare.reset(); // kapak durumu değişti: yansıma geçmişi geçersiz
       this.ref = cur; // yeni kararlı durum
       this.run = 0;
     } else if (!swingRecent && Math.abs(delta) < this.decide / 2) {
@@ -228,7 +256,177 @@ export class DoorMonitor {
         highlights: this.ref.highlights * 0.9 + cur.highlights * 0.1,
       };
     }
+    if (!ev && glareEv) ev = glareEv;
     if (ev) this.events.push({ t, type: ev });
     return ev;
+  }
+}
+
+// ---------------- Camda yansıma ----------------
+
+/**
+ * Camdaki yansımayı bulur. Yansıma (tavan lambası, pencere) camın üstünde sabit durmaz:
+ * kamera kıpırdadıkça dolabın içeriğine göre kayar. Dolap koordinatındaki örneklerde
+ * ürünler yerinde kalır, yansıma gezinir. Son ~1 sn'de her pikselin en koyu hali
+ * "yansımasız" görüntüdür; güncel kare bundan belirgin parlak + renksiz + geniş ise yansımadır.
+ * İnce kenar titreşimleri (morfolojik açma) ve küçük ışıltılar (konserve, şişe) elenir.
+ * Kamera yeterince kıpırdamadıysa karar verilmez.
+ */
+export class GlareDetector {
+  // maxSat: yansıma alttaki ürün rengiyle karışır (doygunluk ~0,3); sabit beyaz ürünler zaten zamanla değişmediği için elenir
+  constructor({ win = 28, minFrames = 12, resid = 28, maxSat = 0.45, minL = 150, minBlob = 0.008, minFrac = 0.004, maxStep = 10, minMotion = 0.012 } = {}) {
+    Object.assign(this, { win, minFrames, resid, maxSat, minL, minBlob, minFrac, maxStep, minMotion });
+    this.reset();
+  }
+
+  reset() {
+    this.buf = []; // { L: Float32Array, vis: Uint8Array }
+    this.ema = 0; // yansıma görülen örnek oranı (hareketli örneklerde)
+    this.n = 0;
+    this.state = 'unknown'; // unknown | seen | none
+    this.lastFrac = 0;
+    this.seenRun = 0;
+  }
+
+  update(sample, motion) {
+    const { data, w, h } = sample;
+    const n = w * h;
+    const L = new Float32Array(n);
+    const S = new Float32Array(n);
+    const vis = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const r = data[i * 4];
+      const g = data[i * 4 + 1];
+      const b = data[i * 4 + 2];
+      vis[i] = data[i * 4 + 3] === 254 ? 1 : 0;
+      L[i] = 0.299 * r + 0.587 * g + 0.114 * b;
+      const mx = Math.max(r, g, b);
+      S[i] = mx > 0 ? (mx - Math.min(r, g, b)) / mx : 0;
+    }
+    this.buf.push({ L, S, vis });
+    if (this.buf.length > this.win) this.buf.shift();
+    if (this.buf.length < this.minFrames) return null;
+
+    // Pencere içindeki parlaklık aralığı: yansıma son ~2 sn'de pikselin üstünden geçtiyse
+    // (bir an parlak + renksiz, bir an değil) aralık büyük olur. Yansımanın şu an görünmesi gerekmez.
+    // Ürünler yerinde durduğu için aralıkları küçüktür.
+    const mask = new Uint8Array(n);
+    let visN = 0;
+    for (let i = 0; i < n; i++) {
+      if (!vis[i]) continue;
+      visN++;
+      let mn = Infinity;
+      let mx = -Infinity;
+      let sAtMax = 1;
+      let ok = true;
+      for (const f of this.buf) {
+        if (!f.vis[i]) {
+          ok = false;
+          break;
+        }
+        const l = f.L[i];
+        if (l < mn) mn = l;
+        if (l > mx) {
+          mx = l;
+          sAtMax = f.S[i];
+        }
+      }
+      if (ok && mx - mn > this.resid && sAtMax < this.maxSat && mx > this.minL) mask[i] = 1;
+    }
+    // Morfolojik açma (3x3): ince kenar titreşimlerini sil
+    const er = new Uint8Array(n);
+    for (let y = 1; y < h - 1; y++)
+      for (let x = 1; x < w - 1; x++) {
+        let all = 1;
+        for (let dy = -1; dy <= 1 && all; dy++) for (let dx = -1; dx <= 1; dx++) if (!mask[(y + dy) * w + x + dx]) { all = 0; break; }
+        er[y * w + x] = all;
+      }
+    const op = new Uint8Array(n);
+    for (let y = 0; y < h; y++)
+      for (let x = 0; x < w; x++) {
+        if (!er[y * w + x]) continue;
+        for (let dy = -1; dy <= 1; dy++)
+          for (let dx = -1; dx <= 1; dx++) {
+            const yy = y + dy;
+            const xx = x + dx;
+            if (yy >= 0 && xx >= 0 && yy < h && xx < w) op[yy * w + xx] = 1;
+          }
+      }
+    // Yeterince büyük bölgeler (küçük ışıltıları ele)
+    const seen = new Uint8Array(n);
+    const minArea = this.minBlob * Math.max(1, visN);
+    let kept = 0;
+    const stack = [];
+    for (let i = 0; i < n; i++) {
+      if (!op[i] || seen[i]) continue;
+      let area = 0;
+      stack.push(i);
+      seen[i] = 1;
+      while (stack.length) {
+        const k = stack.pop();
+        area++;
+        const x = k % w;
+        const y = (k - x) / w;
+        for (const [nx, ny] of [
+          [x + 1, y],
+          [x - 1, y],
+          [x, y + 1],
+          [x, y - 1],
+        ]) {
+          if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+          const j = ny * w + nx;
+          if (op[j] && !seen[j]) {
+            seen[j] = 1;
+            stack.push(j);
+          }
+        }
+      }
+      if (area >= minArea) kept += area;
+    }
+    const frac = visN ? kept / visN : 0;
+    this.lastFrac = frac;
+    // Kalıcı genel değişim mi (kapak açıldı, ışık değişti)? Pencerenin ilk ve son örneklerini
+    // karşılaştır: dolabın çoğunda fark varsa adım değişimidir; gezinen yansıma ise yalnız bandın
+    // bulunduğu yerleri değiştirir (fark ortancası küçük kalır).
+    const k = Math.min(4, Math.floor(this.buf.length / 3));
+    const hist = new Uint32Array(256);
+    let hn = 0;
+    for (let i = 0; i < n; i++) {
+      if (!vis[i]) continue;
+      let a = 0;
+      let b = 0;
+      let ok = true;
+      for (let j = 0; j < k; j++) {
+        const fa = this.buf[j];
+        const fb = this.buf[this.buf.length - 1 - j];
+        if (!fa.vis[i] || !fb.vis[i]) {
+          ok = false;
+          break;
+        }
+        a += fa.L[i];
+        b += fb.L[i];
+      }
+      if (!ok) continue;
+      hist[Math.min(255, Math.round(Math.abs(b - a) / k))]++;
+      hn++;
+    }
+    let acc = 0;
+    let step = 0;
+    for (; step < 256; step++) {
+      acc += hist[step];
+      if (acc >= hn / 2) break;
+    }
+    this.lastStep = step;
+    // Karar yalnız kamera kıpırdadıysa (sabit kamerada yansıma da sabit kalır, ayırt edilemez).
+    // Kalıcı genel değişim (kapak açıldı, ışık değişti) yansıma değildir: o anı sayma.
+    if (motion >= this.minMotion && step <= this.maxStep) {
+      const hit = frac > this.minFrac ? 1 : 0;
+      this.ema = this.n ? 0.85 * this.ema + 0.15 * hit : hit;
+      this.n++;
+      this.seenRun = hit ? this.seenRun + 1 : 0;
+      if (this.n >= 8 && this.ema > 0.5) this.state = 'seen';
+      else if (this.n >= 20 && this.ema < 0.1) this.state = 'none';
+    }
+    return frac;
   }
 }

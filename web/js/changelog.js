@@ -1,9 +1,18 @@
 // Sürüm notları. Yeni sürüm çıkınca en üste ekle ve APP_VERSION'ı güncelle.
 // Sayfa açılınca, bu cihazda son görülen sürümden yeni olan maddeler üstte gösterilir.
 
-export const APP_VERSION = '1.7';
+export const APP_VERSION = '1.8';
 
 export const CHANGELOG = [
+  {
+    version: '1.8',
+    date: '6 Kasım 2026',
+    items: [
+      'Camda yansıma: kamera kıpırdadıkça camda kayan yansıma (tavan lambası, pencere) görülürse kapak "kapalı" anlaşılır; kapağın hareket etmesini beklemek gerekmez.',
+      'Etikette neden yazar: "Kapak: kapalı · yansıma".',
+      'Kapak açılış/kapanış tespiti yansımalı camda da doğru çalışacak şekilde düzeltildi.',
+    ],
+  },
   {
     version: '1.7',
     date: '6 Kasım 2026',

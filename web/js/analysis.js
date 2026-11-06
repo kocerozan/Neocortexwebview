@@ -81,7 +81,14 @@ export function analyze(st) {
   ];
   if (st.door) {
     const v = { open: 'Açık', closed: 'Kapalı', unknown: 'Bilinmiyor' }[st.door.state] || 'Bilinmiyor';
-    const hint = st.door.opened || st.door.closed ? `${st.door.opened} kez açıldı, ${st.door.closed} kez kapandı` : st.door.confident ? 'çekim sonunda' : 'tahmin, kapak hareketi görülmedi';
+    const hint =
+      st.door.opened || st.door.closed
+        ? `${st.door.opened} kez açıldı, ${st.door.closed} kez kapandı`
+        : st.door.reason === 'yansıma'
+          ? 'camda yansıma görüldü'
+          : st.door.state === 'unknown'
+            ? 'kapak hareketi ya da yansıma görülmedi'
+            : 'çekim sonunda';
     metrics.push({ label: 'Kapak', value: v, hint });
   }
 

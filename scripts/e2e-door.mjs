@@ -48,7 +48,10 @@ try {
   check(['closed', 'unknown'].includes(at(1.8).state), `kapak açılmadan önce: ${at(1.8).state} (kapalı ya da bilinmiyor olmalı)`);
   check(at(4.2).state === 'open', `kapak açıkken: ${at(4.2).state} — etiket "${at(4.2).chip}"`);
   check(at(6.8).state === 'closed', `kapak kapandıktan sonra: ${at(6.8).state} — etiket "${at(6.8).chip}"`);
-  const types = ev.map((e) => e.type);
+  // 'glare' (camda yansımadan "kapalı") kapak açılmadan önce gelebilir; doğru bir bilgi, sıralamaya katılmaz
+  const types = ev.filter((e) => e.type !== 'glare').map((e) => e.type);
+  const g = ev.find((e) => e.type === 'glare');
+  check(!g || g.t < 3.0, `yansıma olayı varsa kapak kapalıyken (${g ? g.t.toFixed(2) + ' sn' : 'yok'})`);
   check(types.join(',') === 'opened,closed', `olay sırası: ${types.join(', ') || '(yok)'}`);
   const op = ev.find((e) => e.type === 'opened');
   // Karar hareket bitince verilir: gerçek hareket 2-3 sn, bildirim en geç ~1 sn sonra

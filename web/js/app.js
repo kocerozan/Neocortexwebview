@@ -245,9 +245,18 @@ function checkDoor(v, dw, dh) {
   if (!S.door || !S.detRGBA) return;
   if (++S.doorTick % 2) return;
   const t = S.mode === 'upload' ? v.currentTime : performance.now() / 1000;
-  const ev = S.door.update(sampleRect(S.detRGBA, dw, dh, S.lock.Ginv(), 64, 48), t);
+  // Kameranın dolaba göre son ~1 sn'deki hareketi (yansıma ancak kamera kıpırdayınca ayırt edilir)
+  const q = S.lock.quad;
+  const c = { x: (q[0].x + q[1].x + q[2].x + q[3].x) / 4, y: (q[0].y + q[1].y + q[2].y + q[3].y) / 4 };
+  const diag = Math.hypot(q[2].x - q[0].x, q[2].y - q[0].y);
+  S.quadHist = (S.quadHist || []).filter((e) => t - e.t < 1.2 && e.t <= t);
+  S.quadHist.push({ t, c, diag });
+  let motion = 0;
+  for (const e of S.quadHist) motion = Math.max(motion, Math.hypot(e.c.x - c.x, e.c.y - c.y) / diag + Math.abs(Math.log(e.diag / diag)));
+  const ev = S.door.update(sampleRect(S.detRGBA, dw, dh, S.lock.Ginv(), 64, 48), t, motion);
   if (ev === 'opened') toast('Kapak açıldı');
   if (ev === 'closed') toast('Kapak kapandı');
+  if (ev === 'glare') toast('Camda yansıma görüldü: kapak kapalı');
   updateDoorChip();
 }
 
@@ -256,11 +265,17 @@ function updateDoorChip() {
   const D = S.door;
   chip.classList.toggle('hidden', !(S.lock && S.lock.used && D));
   if (!D) return;
-  const txt = D.moving ? 'Kapak hareket ediyor…' : D.state === 'open' ? 'Kapak: açık' : D.state === 'closed' ? 'Kapak: kapalı' : 'Kapak: ?';
+  const txt = D.moving
+    ? 'Kapak hareket ediyor…'
+    : D.state === 'open'
+      ? 'Kapak: açık'
+      : D.state === 'closed'
+        ? D.reason === 'yansıma' ? 'Kapak: kapalı · yansıma' : 'Kapak: kapalı'
+        : 'Kapak: ?';
   chip.classList.toggle('paused', D.paused); // yakın çekimde değerlendirme duraklar
   if ($('chip-door-text').textContent !== txt) $('chip-door-text').textContent = txt;
   chip.classList.toggle('open', D.state === 'open' && !D.moving);
-  chip.title = D.confidence === 'high' ? 'Kapak hareketi görüldü' : 'Tahmin (kapak hareketi henüz görülmedi)';
+  chip.title = D.reason === 'yansıma' ? 'Camda kamera ile kayan yansıma görüldü' : D.reason === 'hareket' ? 'Kapak hareketi görüldü' : 'Kapak hareketi ya da cam yansıması henüz görülmedi';
 }
 
 function captureLockKeyframe(v, k) {
@@ -1077,6 +1092,7 @@ function computeAnalysis() {
           opened: S.door.events.filter((e) => e.type === 'opened').length,
           closed: S.door.events.filter((e) => e.type === 'closed').length,
           confident: S.door.confidence === 'high',
+          reason: S.door.reason,
         }
       : null,
     keyframes: S.rectified ? S.lock.kfs.length : S.keyframes.length,
