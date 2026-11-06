@@ -40,7 +40,12 @@ export function analyze(st) {
 
   const gapPenalty = Math.min(35, (1 - fill) * 150);
   score -= gapPenalty;
-  if (1 - fill > 0.08) tips.push(`Taranan alanın ${pct(1 - fill)} kadarı boş kaldı. Mavi olmayan yerleri yeni çekimle tamamla.`);
+  if (1 - fill > 0.08)
+    tips.push(
+      st.cabinet
+        ? `Dolabın ${pct(1 - fill)} kadarı yakından çekilmedi. Mini haritada mavi olmayan yerlere yaklaşıp çek.`
+        : `Taranan alanın ${pct(1 - fill)} kadarı boş kaldı. Mavi olmayan yerleri yeni çekimle tamamla.`,
+    );
 
   const fastPenalty = Math.min(25, fastRatio * 100);
   score -= fastPenalty;
@@ -54,7 +59,7 @@ export function analyze(st) {
   score -= driftPenalty;
   if (yDrift > 0.25 && coverW >= coverH) tips.push('Kamera yukarı-aşağı fazla oynadı. Telefonu aynı yükseklikte tutarak yatay kaydır.');
 
-  if (coverW < 1.3 && coverH < 1.3) {
+  if (!st.cabinet && coverW < 1.3 && coverH < 1.3) {
     score -= 10;
     tips.push('Çok az alan tarandı. Teşhirin tamamı için kamerayı bir uçtan diğer uca götür.');
   }
@@ -67,7 +72,7 @@ export function analyze(st) {
   const metrics = [
     { label: 'Süre', value: `${nf(st.duration || 0)} sn`, hint: `${st.clips || 0} çekim` },
     { label: 'Taranan alan', value: `${nf(coverW)} × ${nf(coverH)}`, hint: 'kadraj (en × boy)' },
-    { label: 'Kapsama', value: pct(fill), hint: 'mavi boyanan oran' },
+    { label: 'Kapsama', value: pct(fill), hint: st.cabinet ? 'dolabın çekilen kısmı' : 'mavi boyanan oran' },
     { label: 'Ortalama hız', value: nf(avgSpeed, 2), hint: 'kadraj / sn' },
     { label: 'Hızlı anlar', value: pct(fastRatio), hint: 'çok hızlı kaydırma' },
     { label: 'Takip kaybı', value: pct(lostRatio), hint: 'takip edilemeyen kare' },

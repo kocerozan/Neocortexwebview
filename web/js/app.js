@@ -1,11 +1,13 @@
 import { toGray, estimateShift, refinePositions } from './tracker.js';
-import { stitchPanorama } from './stitcher.js';
+import { stitchPanorama, rectifyMosaic } from './stitcher.js';
 import { warpPerspective, suggestOutputSize, isConvexQuad, phoneFocal } from './perspective.js';
 import { mergeClips, pickMimeType, extensionFor } from './merger.js';
 import { bridge } from './bridge.js';
 import { analyze } from './analysis.js';
 import { detectQuad } from './detector.js';
 import { APP_VERSION, CHANGELOG, entriesToShow } from './changelog.js';
+import { CabinetLock } from './cabinetlock.js';
+import { applyH } from './homotrack.js';
 
 const $ = (id) => document.getElementById(id);
 
@@ -20,8 +22,9 @@ const MASK_W = 3200;
 const MASK_H = 2400;
 const COVER_COLOR = '#2F80ED';
 const COVER_ALPHA = 0.42;
-const DET_W = 256; // dolap algılama karesi genişliği (daha küçükte ince kasalar kaybolur)
-const DET_MS = 500; // canlı algılama aralığı
+const DET_W = 384; // dolap algılama ve kilit takibi karesi genişliği
+const DET_MS = 500; // canlı algılama aralığı (kilitliyken 2 katı: yalnız kayma düzeltmesi için)
+const CLOSE_AREA = 2.0; // kare en fazla 2 dolap alanı görüyorsa (dolap ekranın yarısından fazlası) "yakın çekim": mavi boyanır
 const DET_COLOR = '#34C759';
 
 const S = {
@@ -36,6 +39,7 @@ const S = {
   mergeGen: 0, mergePromise: null, merged: null, resultBlob: null, resultSize: null,
   mode: 'camera', upload: null, stats: null, analysis: null, lastT: 0,
   det: null, lastDet: 0, detCtx: null, detGray: null, cornersAuto: false, cornersTouched: false,
+  lock: null, lockNewClip: false, lockArmed: true, rectified: false, rectFilled: 0,
 };
 const newDet = () => ({ q: null, pos: { x: 0, y: 0 }, hits: 0, misses: 0, shown: false });
 S.det = newDet();
@@ -148,7 +152,7 @@ function tick() {
     maybeKeyframe(v);
     updateTimer();
   }
-  maybeDetect(v);
+  lockAndDetect(v);
   drawOverlay();
   drawMinimap();
   $('chip-speed').classList.toggle('hidden', !(S.recording && S.speed > RADIUS * 0.6));
@@ -182,13 +186,108 @@ function grayOf(source, w, h) {
   return toGray(ctx.getImageData(0, 0, w, h).data, S.detGray);
 }
 
-function maybeDetect(v) {
-  const now = performance.now();
-  if (now - S.lastDet < DET_MS) return;
-  S.lastDet = now;
+// Takip karesi (DET_W genişlik): kilitliyken her karede, değilse algılama zamanında alınır.
+function lockAndDetect(v) {
   const dw = DET_W;
   const dh = Math.round((DET_W * S.vh) / S.vw);
-  const r = detectQuad(grayOf(v, dw, dh), dw, dh);
+  if (!S.lock || S.lock.w !== dw || S.lock.h !== dh) {
+    S.lock = new CabinetLock(dw, dh);
+    updateLockChip();
+  }
+  const L = S.lock;
+  const now = performance.now();
+  const detDue = now - S.lastDet >= (L.active ? DET_MS * 2 : DET_MS);
+  if (!L.active && !detDue) return;
+  const g = grayOf(v, dw, dh);
+  if (L.active) {
+    L.update(g);
+    if (L.state === 'lost') {
+      updateLockChip();
+      toast('Dolap takibi kayboldu. Dolabın tamamını kadraja al, kendiliğinden devam eder.');
+    } else if (S.recording) {
+      // Yakın çekim kapsaması ve anahtar kareler (dolap koordinatlarında)
+      const zone = [
+        { x: INSET * dw, y: INSET * dh },
+        { x: (1 - INSET) * dw, y: INSET * dh },
+        { x: (1 - INSET) * dw, y: (1 - INSET) * dh },
+        { x: INSET * dw, y: (1 - INSET) * dh },
+      ];
+      const frame = [
+        { x: 0, y: 0 },
+        { x: dw, y: 0 },
+        { x: dw, y: dh },
+        { x: 0, y: dh },
+      ];
+      // Mavi kapsama yalnız yakın çekimde: dolap ekranı dolduruyorsa
+      const close = L.viewArea(frame) <= CLOSE_AREA;
+      if (close) L.paint(zone);
+      setLockHint(close ? 'close' : 'far');
+      const k = L.keyframeNeeded(frame, S.lockNewClip);
+      if (k) {
+        S.lockNewClip = false;
+        captureLockKeyframe(v, k);
+      }
+    }
+  }
+  if (detDue) {
+    S.lastDet = now;
+    maybeDetect(g, dw, dh);
+  }
+}
+
+function captureLockKeyframe(v, k) {
+  const c = document.createElement('canvas');
+  c.width = S.KW;
+  c.height = S.KH;
+  c.getContext('2d').drawImage(v, 0, 0, S.KW, S.KH);
+  const kf = { G: S.lock.keyframeG(k.G, S.KW, S.KH), area: k.area, blob: null };
+  kf.ready = new Promise((res) =>
+    c.toBlob(
+      (b) => {
+        kf.blob = b;
+        res();
+      },
+      'image/jpeg',
+      0.92,
+    ),
+  );
+  S.lock.kfs.push(kf);
+}
+
+let lockHint = null;
+function setLockHint(kind) {
+  if (lockHint === kind) return;
+  lockHint = kind;
+  if (kind === 'far') setHint('Dolap kilitli. Yaklaş; dolap ekranı doldurunca çektiğin yerler maviye boyanır.');
+  else if (kind === 'close') setHint('Yakın çekim. Mini haritada mavi olmayan yerleri de çek.');
+}
+
+function updateLockChip() {
+  const chip = $('chip-det');
+  const st = S.lock ? S.lock.state : 'off';
+  chip.classList.toggle('warn', st === 'lost');
+  chip.classList.toggle('det', st !== 'lost');
+  $('chip-det-text').textContent = st === 'on' ? 'Dolap kilitli' : st === 'lost' ? 'Dolap aranıyor…' : 'Dolap algılandı';
+  chip.classList.toggle('hidden', st === 'off' && !S.det.shown);
+}
+
+async function askUnlock() {
+  if (!S.lock || !S.lock.used) return;
+  const yes = await confirmSheet({
+    title: 'Dolap kilidi kaldırılsın mı?',
+    text: 'Çerçeve dolaptan ayrılır. Başka bir dolap çekeceksen kaldır.',
+    warn: 'Bu dolap için yaptığın yakın çekim kapsaması ve dolap kareleri silinir.',
+    ok: 'Kilidi kaldır',
+  });
+  if (!yes) return;
+  S.lock = null;
+  S.lockArmed = false; // dolap kadrajdan çıkana kadar yeniden kilitleme
+  S.det = newDet();
+  updateLockChip();
+}
+
+function maybeDetect(g, dw, dh) {
+  const r = detectQuad(g, dw, dh);
   const d = S.det;
   // Önceki çerçeveyi kamera hareketi kadar kaydır (karşılaştırma için)
   const sx = -(S.pos.x - d.pos.x) / S.PW;
@@ -209,15 +308,24 @@ function maybeDetect(v) {
     }
   }
   const shown = d.hits >= 2 && !!d.q;
-  if (shown !== d.shown) {
-    d.shown = shown;
-    $('chip-det').classList.toggle('hidden', !shown);
+  d.shown = shown;
+  if (!shown && d.misses >= 3) S.lockArmed = true; // dolap kadrajdan çıktı: yeniden kilitlenebilir
+  // Kilitleme / yeniden yakalama / kayma düzeltme
+  const L = S.lock;
+  if (r && L) {
+    if (L.state === 'on') L.onDetection(r.corners, g);
+    else if (shown && S.lockArmed) {
+      const res = L.onDetection(r.corners, g);
+      if (res === 'locked') toast('Dolap kilitlendi. Yaklaşıp yakın çekim yapabilirsin, çerçeve dolabın üstünde kalır.');
+      if (res === 'relocked') toast('Dolap yeniden bulundu.');
+    }
   }
+  updateLockChip();
 }
 
 function drawDetection(ctx, ox, oy, fw, fh) {
   const d = S.det;
-  if (!d.shown || !d.q) return;
+  if (!d.shown || !d.q || (S.lock && S.lock.active)) return;
   // Algılamalar arasında çerçeve kamera hareketiyle birlikte kayar
   const sx = -(S.pos.x - d.pos.x) / S.PW;
   const sy = -(S.pos.y - d.pos.y) / S.PH;
@@ -248,6 +356,107 @@ function drawDetection(ctx, ox, oy, fw, fh) {
   ctx.fill();
   ctx.fillStyle = '#fff';
   ctx.fillText(label, lx + 8, ly + 15.5);
+}
+
+// Kilitli dolap çerçevesi ve dolabın üstündeki mavi kapsama
+function drawLock(ctx, ox, oy, fw, fh) {
+  const L = S.lock;
+  if (!L || !L.active || !L.quad) return;
+  const kx = fw / L.w;
+  const ky = fh / L.h;
+  const toD = (p) => ({ x: ox + p.x * kx, y: oy + p.y * ky });
+  const qd = L.quad.map(toD);
+  const quadPath = () => {
+    ctx.beginPath();
+    qd.forEach((p, i) => (i ? ctx.lineTo(p.x, p.y) : ctx.moveTo(p.x, p.y)));
+    ctx.closePath();
+  };
+  if (L.polys.length) {
+    const Gi = L.Ginv();
+    ctx.save();
+    quadPath();
+    ctx.clip();
+    ctx.beginPath();
+    for (const poly of L.polys) {
+      const pts = poly.map((u) => applyH(Gi, u.x, u.y));
+      if (pts.some((p) => !p)) continue;
+      pts.forEach((p, i) => {
+        const d = toD(p);
+        if (i) ctx.lineTo(d.x, d.y);
+        else ctx.moveTo(d.x, d.y);
+      });
+      ctx.closePath();
+    }
+    ctx.globalAlpha = COVER_ALPHA;
+    ctx.fillStyle = COVER_COLOR;
+    ctx.fill('nonzero');
+    ctx.restore();
+    ctx.globalAlpha = 1;
+  }
+  quadPath();
+  ctx.lineWidth = 4;
+  ctx.lineJoin = 'round';
+  ctx.strokeStyle = DET_COLOR;
+  ctx.stroke();
+  ctx.fillStyle = DET_COLOR;
+  const onScreen = qd.filter((p) => p.x >= ox && p.y >= oy && p.x <= ox + fw && p.y <= oy + fh);
+  for (const p of onScreen) {
+    ctx.beginPath();
+    ctx.arc(p.x, p.y, 6, 0, Math.PI * 2);
+    ctx.fill();
+  }
+  // Etiket: görünen sol-üst köşede, köşe ekran dışındaysa ekranın sol üstünde
+  const label = 'Dolap · kilitli';
+  ctx.font = '600 13px Roboto, system-ui, sans-serif';
+  const tw = ctx.measureText(label).width + 16;
+  const anchor = qd[0].x >= ox && qd[0].y >= oy + 30 && qd[0].x <= ox + fw && qd[0].y <= oy + fh ? qd[0] : { x: ox + 8, y: oy + 36 };
+  const lx = Math.max(ox + 4, Math.min(anchor.x, ox + fw - tw - 4));
+  const ly = Math.max(oy + 4, anchor.y - 28);
+  ctx.beginPath();
+  if (ctx.roundRect) ctx.roundRect(lx, ly, tw, 22, 11);
+  else ctx.rect(lx, ly, tw, 22);
+  ctx.fill();
+  ctx.fillStyle = '#fff';
+  ctx.fillText(label, lx + 8, ly + 15.5);
+}
+
+function drawLockMinimap(ctx, cv) {
+  const L = S.lock;
+  const a = L.aspect;
+  const pad = 8;
+  const aw = cv.width - 2 * pad;
+  const ah = cv.height - 2 * pad;
+  const dw = Math.min(aw, ah * a);
+  const dh = dw / a;
+  const ox = (cv.width - dw) / 2;
+  const oy = (cv.height - dh) / 2;
+  ctx.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx.fillRect(ox, oy, dw, dh);
+  if (L.mask) ctx.drawImage(L.mask, ox, oy, dw, dh);
+  ctx.strokeStyle = DET_COLOR;
+  ctx.lineWidth = 3;
+  ctx.strokeRect(ox, oy, dw, dh);
+  if (L.active) {
+    const v = L.viewOnCabinet([
+      { x: 0, y: 0 },
+      { x: L.w, y: 0 },
+      { x: L.w, y: L.h },
+      { x: 0, y: L.h },
+    ]);
+    if (v) {
+      ctx.save();
+      ctx.beginPath();
+      ctx.rect(2, 2, cv.width - 4, cv.height - 4);
+      ctx.clip();
+      ctx.beginPath();
+      v.forEach((p, i) => (i ? ctx.lineTo(ox + p.x * dw, oy + p.y * dh) : ctx.moveTo(ox + p.x * dw, oy + p.y * dh)));
+      ctx.closePath();
+      ctx.strokeStyle = '#fff';
+      ctx.lineWidth = 3;
+      ctx.stroke();
+      ctx.restore();
+    }
+  }
 }
 
 // ---------------- Mavi kapsama katmanı ----------------
@@ -295,13 +504,14 @@ function drawOverlay() {
   const ox = (dw - fw) / 2;
   const oy = (dh - fh) / 2;
 
-  if (S.cover) {
+  if (S.cover && !(S.lock && S.lock.used)) {
     ctx.globalAlpha = COVER_ALPHA;
     ctx.imageSmoothingEnabled = true;
     drawImageClipped(ctx, S.mask, S.maskOX + S.pos.x, S.maskOY + S.pos.y, S.PW, S.PH, ox, oy, fw, fh);
     ctx.globalAlpha = 1;
   }
   drawDetection(ctx, ox, oy, fw, fh);
+  drawLock(ctx, ox, oy, fw, fh);
 
   // Kadraj köşeleri (çekim bölgesi)
   const zx = ox + INSET * fw;
@@ -344,6 +554,7 @@ function drawMinimap() {
   mmCtx ||= cv.getContext('2d');
   const ctx = mmCtx;
   ctx.clearRect(0, 0, cv.width, cv.height);
+  if (S.lock && S.lock.used) return drawLockMinimap(ctx, cv);
   const view = { minX: S.pos.x, minY: S.pos.y, maxX: S.pos.x + S.PW, maxY: S.pos.y + S.PH };
   const b = S.cover
     ? {
@@ -420,6 +631,7 @@ function startClip() {
   S.recorder = rec;
   S.recording = true;
   S.newClip = true;
+  S.lockNewClip = true;
   S.recStart = performance.now();
   invalidateResults();
   updateUI();
@@ -450,6 +662,7 @@ function updateTimer() {
 }
 
 function updateUI() {
+  lockHint = null;
   const cam = $('screen-camera');
   cam.classList.toggle('is-recording', S.recording);
   $('btn-record').setAttribute('aria-label', S.recording ? 'Kaydı durdur' : 'Kaydı başlat');
@@ -497,7 +710,10 @@ function resetAll() {
   S.det = newDet();
   S.cornersAuto = false;
   S.cornersTouched = false;
-  $('chip-det').classList.add('hidden');
+  S.lock = null;
+  S.lockArmed = true;
+  S.rectified = false;
+  updateLockChip();
   S.hasPrev = false;
   if (S.mode === 'upload') leaveUpload();
   showScreen('camera');
@@ -554,6 +770,7 @@ function startUploadPlayback() {
   if (v.ended) return;
   S.recording = true;
   S.newClip = true; // devamda ilk kare anahtar kare olsun
+  S.lockNewClip = true;
   S.hasPrev = false;
   invalidateResults();
   v.play().catch(() => {
@@ -621,7 +838,16 @@ async function finish() {
   showBusy('Çekimler birleştiriliyor…');
   startMerge();
   try {
-    S.pano = await buildPanorama();
+    S.rectified = !!(S.lock && S.lock.kfs.length);
+    if (S.rectified) {
+      // Kilitli dolap: yakın çekim kareleri doğrudan düz dolap görüntüsüne yerleştirilir
+      setBusyText('Dolap görüntüsü oluşturuluyor…');
+      await new Promise((r) => setTimeout(r, 30));
+      S.pano = await buildRectified();
+    } else {
+      S.pano = await buildPanorama();
+      S.corners = null; // yeni panorama: köşeler yeniden bulunsun
+    }
     S.analysis = computeAnalysis();
   } catch (e) {
     console.error(e);
@@ -630,7 +856,58 @@ async function finish() {
     return;
   }
   hideBusy();
-  openPerspective();
+  if (S.rectified) {
+    // Görüntü zaten düz: köşeler tam görüntü, doğrudan sonuca geç (köşeler istenirse sonradan ayarlanır)
+    const w = S.pano.width;
+    const h = S.pano.height;
+    S.corners = [
+      { x: 0, y: 0 },
+      { x: w, y: 0 },
+      { x: w, y: h },
+      { x: 0, y: h },
+    ];
+    S.cornersAuto = true;
+    S.cornersTouched = false;
+    openPerspective();
+    await applyPerspective();
+  } else openPerspective();
+}
+
+async function buildRectified() {
+  const L = S.lock;
+  await Promise.all(L.kfs.map((k) => k.ready));
+  const kfs = L.kfs.filter((k) => k.blob);
+  if (!kfs.length) throw new Error('Dolap karesi yok');
+  const images = await Promise.all(kfs.map((k) => decodeImage(k.blob)));
+  // Çıktı çözünürlüğü: en yakın çekimin detayına göre (dolap genişliği başına piksel)
+  let ppu = 0;
+  kfs.forEach((k, i) => {
+    const im = images[i];
+    const pts = [
+      [0, 0],
+      [im.width, 0],
+      [im.width, im.height],
+      [0, im.height],
+    ].map(([x, y]) => applyH(k.G, x, y));
+    if (pts.some((p) => !p)) return;
+    const wU = Math.max(...pts.map((p) => p.x)) - Math.min(...pts.map((p) => p.x));
+    if (wU > 0.02) ppu = Math.max(ppu, im.width / wU);
+  });
+  const aspect = L.aspect;
+  let OW = Math.round(Math.min(2400, Math.max(900, ppu || 1200)));
+  let OH = Math.round(OW / aspect);
+  if (OW * OH > 6e6) {
+    const f = Math.sqrt(6e6 / (OW * OH));
+    OW = Math.round(OW * f);
+    OH = Math.round(OH * f);
+  }
+  const { canvas, filled } = rectifyMosaic(
+    kfs.map((k, i) => ({ image: images[i], G: k.G, area: k.area })),
+    OW,
+    OH,
+  );
+  S.rectFilled = filled;
+  return canvas;
 }
 
 function startMerge() {
@@ -754,10 +1031,11 @@ function computeAnalysis() {
     ...S.stats,
     duration: S.clips.reduce((s, k) => s + k.duration, 0),
     clips: S.mode === 'upload' ? 1 : S.clips.length,
-    keyframes: S.keyframes.length,
     coverW,
     coverH,
-    fill: coverageFill(),
+    fill: S.rectified ? S.lock.coverage() : coverageFill(),
+    cabinet: S.rectified,
+    keyframes: S.rectified ? S.lock.kfs.length : S.keyframes.length,
   });
 }
 
@@ -1142,6 +1420,7 @@ $('btn-record').addEventListener('click', () => {
   return S.recording ? stopClip() : startClip();
 });
 $('btn-upload').addEventListener('click', askUpload);
+$('chip-det').addEventListener('click', askUnlock);
 $('btn-upload-err').addEventListener('click', askUpload);
 $('file-input').addEventListener('change', (e) => {
   const f = e.target.files && e.target.files[0];

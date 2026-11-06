@@ -1,9 +1,19 @@
 // Sürüm notları. Yeni sürüm çıkınca en üste ekle ve APP_VERSION'ı güncelle.
 // Sayfa açılınca, bu cihazda son görülen sürümden yeni olan maddeler üstte gösterilir.
 
-export const APP_VERSION = '1.5';
+export const APP_VERSION = '1.6';
 
 export const CHANGELOG = [
+  {
+    version: '1.6',
+    date: '6 Kasım 2026',
+    items: [
+      'Kilitli dolap: dolap bulununca çerçeve kilitlenir; yaklaştıkça, kaydıkça dolabın üstünde kalır.',
+      'Yakın çekim kapsaması: dolap ekranı doldurunca çektiğin yerler dolabın üstünde maviye boyanır; mini harita dolabı gösterir.',
+      'Yakın çekimlerden düz dolap: Bitir’e basınca kareler doğrudan dolabın düz görünümüne yerleşir, daha detaylı sonuç.',
+      'Kilidi kaldırmak için yeşil "Dolap kilitli" etiketine dokun.',
+    ],
+  },
   {
     version: '1.5',
     date: '5 Kasım 2026',

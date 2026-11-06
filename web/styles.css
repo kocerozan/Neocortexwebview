@@ -213,7 +213,8 @@ svg { fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; 
 .cam-error .btn-secondary { background: transparent; color: #fff; border-color: rgba(255,255,255,.6); }
 
 /* ---------- Dolap algılama ---------- */
-.chip.det { background: #34C759; color: #fff; }
+.chip.det, .chip-btn.det { background: #34C759; color: #fff; }
+.chip-btn.warn { background: var(--warn-bg); color: var(--warn-t); }
 .chip.det svg { width: 14px; height: 14px; }
 .quad.auto polygon { stroke: #34C759; fill: rgba(52, 199, 89, .16); stroke-width: 3; }
 .stage-btn {

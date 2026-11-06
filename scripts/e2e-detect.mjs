@@ -34,24 +34,39 @@ try {
   }
   await page.waitForFunction(() => document.getElementById('preview').ended, null, { timeout: 30000 });
   await page.click('#btn-finish');
-  await page.waitForSelector('#screen-perspective:not(.hidden)', { timeout: 20000 });
-  await page.waitForTimeout(300);
-  const st = await page.evaluate(() => ({ auto: window.__neocortex.cornersAuto, c: window.__neocortex.corners, w: window.__neocortex.pano.width, h: window.__neocortex.pano.height, info: document.getElementById('persp-info').textContent }));
-  check(st.auto, `perspektifte köşeler otomatik yerleşti — "${st.info}"`);
-  const rel = st.c.map((p) => ({ x: +(p.x / st.w).toFixed(3), y: +(p.y / st.h).toFixed(3) }));
-  console.log('otomatik köşeler (oransal):', JSON.stringify(rel));
-  if (expectJson && expectJson !== '-') {
-    // Panorama genişliği takibe bağlı (dokusuz duvarda daralır), o yüzden dolabın
-    // en-boy oranını karşılaştır: beklenen [min, max]
-    const [lo, hi] = JSON.parse(expectJson);
-    const c = st.c;
-    const wq = (Math.hypot(c[1].x - c[0].x, c[1].y - c[0].y) + Math.hypot(c[2].x - c[3].x, c[2].y - c[3].y)) / 2;
-    const hq = (Math.hypot(c[3].x - c[0].x, c[3].y - c[0].y) + Math.hypot(c[2].x - c[1].x, c[2].y - c[1].y)) / 2;
-    check(wq / hq >= lo && wq / hq <= hi, `dolap en-boy oranı ${(wq / hq).toFixed(2)} (beklenen ${lo}–${hi})`);
+  await page.waitForFunction(
+    () => !document.getElementById('screen-result').classList.contains('hidden') || !document.getElementById('screen-perspective').classList.contains('hidden'),
+    null,
+    { timeout: 30000 },
+  );
+  const rectified = await page.evaluate(() => window.__neocortex.rectified);
+  if (rectified) {
+    // Kilitli dolap: kareler doğrudan düz dolap görüntüsüne yerleşti, perspektif ekranı atlanır
+    console.log('kilitli dolap akışı: doğrudan düz dolap görüntüsü');
+    await page.waitForSelector('#screen-result:not(.hidden)', { timeout: 30000 });
+    if (expectJson && expectJson !== '-') {
+      const [lo, hi] = JSON.parse(expectJson);
+      const rs = await page.evaluate(() => window.__neocortex.resultSize);
+      check(rs.width / rs.height >= lo && rs.width / rs.height <= hi, `düz dolap oranı ${(rs.width / rs.height).toFixed(2)} (beklenen ${lo}–${hi})`);
+    }
+  } else {
+    await page.waitForTimeout(300);
+    const st = await page.evaluate(() => ({ auto: window.__neocortex.cornersAuto, c: window.__neocortex.corners, w: window.__neocortex.pano.width, h: window.__neocortex.pano.height, info: document.getElementById('persp-info').textContent }));
+    check(st.auto, `perspektifte köşeler otomatik yerleşti — "${st.info}"`);
+    const rel = st.c.map((p) => ({ x: +(p.x / st.w).toFixed(3), y: +(p.y / st.h).toFixed(3) }));
+    console.log('otomatik köşeler (oransal):', JSON.stringify(rel));
+    if (expectJson && expectJson !== '-') {
+      // Panorama genişliği takibe bağlı (dokusuz duvarda daralır), o yüzden dolabın en-boy oranını karşılaştır
+      const [lo, hi] = JSON.parse(expectJson);
+      const c = st.c;
+      const wq = (Math.hypot(c[1].x - c[0].x, c[1].y - c[0].y) + Math.hypot(c[2].x - c[3].x, c[2].y - c[3].y)) / 2;
+      const hq = (Math.hypot(c[3].x - c[0].x, c[3].y - c[0].y) + Math.hypot(c[2].x - c[1].x, c[2].y - c[1].y)) / 2;
+      check(wq / hq >= lo && wq / hq <= hi, `dolap en-boy oranı ${(wq / hq).toFixed(2)} (beklenen ${lo}–${hi})`);
+    }
+    await page.screenshot({ path: `${outDir}/d2-otomatik-kose.png` });
+    await page.click('#btn-apply');
+    await page.waitForSelector('#screen-result:not(.hidden)', { timeout: 20000 });
   }
-  await page.screenshot({ path: `${outDir}/d2-otomatik-kose.png` });
-  await page.click('#btn-apply');
-  await page.waitForSelector('#screen-result:not(.hidden)', { timeout: 20000 });
   await page.waitForTimeout(400);
   await page.screenshot({ path: `${outDir}/d3-sonuc.png` });
   if (resultJson) {
